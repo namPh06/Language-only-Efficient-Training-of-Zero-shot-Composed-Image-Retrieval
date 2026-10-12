@@ -4,17 +4,15 @@ import pickle
 from argparse import ArgumentParser
 from typing import List, Tuple, Dict
 
-import clip
 import numpy as np
 import torch
 import torch.nn.functional as F
-from clip.model import CLIP
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
 from data_utils import PROJECT_ROOT, targetpad_transform
 from loader import CIRRDataset, CIRCODataset
-from encode_with_pseudo_tokens import encode_with_pseudo_tokens_HF
+from encode_with_pseudo_tokens import encode_with_pseudo_tokens_HF, tokenize_retrieval_text
 from models import build_text_encoder, Phi, PIC2WORD
 from utils import extract_image_features, device, collate_fn, extract_pseudo_tokens_with_phi
 
@@ -81,6 +79,7 @@ def cirr_generate_test_dicts(relative_test_dataset: CIRRDataset, clip_model, ind
     index_features = F.normalize(index_features, dim=-1).float()
 
     # Compute the distances and sort the results
+    predicted_features = predicted_features.float().to(device)
     distances = 1 - predicted_features @ index_features.T
     sorted_indices = torch.argsort(distances, dim=-1).cpu()
     sorted_index_names = np.array(index_names)[sorted_indices]
@@ -122,6 +121,9 @@ def cirr_generate_test_predictions(clip_model, relative_test_dataset: CIRRDatase
     group_members_list = []
 
     # Compute the predictions
+    reference_positions = {}
+    for position, reference_name in enumerate(ref_names_list):
+        reference_positions.setdefault(reference_name, position)
     for batch in tqdm(relative_test_loader):
         reference_names = batch['reference_name']
         pairs_id = batch['pair_id']
@@ -133,8 +135,8 @@ def cirr_generate_test_predictions(clip_model, relative_test_dataset: CIRRDatase
         input_captions = [
             f"a photo of $ that {rel_caption}" for rel_caption in relative_captions]
 
-        batch_tokens = torch.vstack([pseudo_tokens[ref_names_list.index(ref)].unsqueeze(0) for ref in reference_names])
-        tokenized_input_captions = clip.tokenize(input_captions, context_length=77).to(device)
+        batch_tokens = torch.vstack([pseudo_tokens[reference_positions[ref]].unsqueeze(0) for ref in reference_names])
+        tokenized_input_captions = tokenize_retrieval_text(clip_model, input_captions, context_length=77).to(device)
         text_features = encode_with_pseudo_tokens_HF(clip_model, tokenized_input_captions, batch_tokens)
 
         predicted_features = F.normalize(text_features)
@@ -192,14 +194,17 @@ def circo_generate_test_predictions(clip_model, relative_test_dataset: CIRCOData
     query_ids_list = []
 
     # Compute the predictions
+    reference_positions = {}
+    for position, reference_name in enumerate(ref_names_list):
+        reference_positions.setdefault(reference_name, position)
     for batch in tqdm(relative_test_loader):
         reference_names = batch['reference_name']
         relative_captions = batch['relative_caption']
         query_ids = batch['query_id']
 
         input_captions = [f"a photo of $ that {caption}" for caption in relative_captions]
-        batch_tokens = torch.vstack([pseudo_tokens[ref_names_list.index(ref)].unsqueeze(0) for ref in reference_names])
-        tokenized_input_captions = clip.tokenize(input_captions, context_length=77).to(device)
+        batch_tokens = torch.vstack([pseudo_tokens[reference_positions[ref]].unsqueeze(0) for ref in reference_names])
+        tokenized_input_captions = tokenize_retrieval_text(clip_model, input_captions, context_length=77).to(device)
         text_features = encode_with_pseudo_tokens_HF(clip_model, tokenized_input_captions, batch_tokens)
         predicted_features = F.normalize(text_features)
 
@@ -226,8 +231,9 @@ def circo_generate_test_dict(relative_test_dataset: CIRCODataset, clip_model, in
     index_features = F.normalize(index_features, dim=-1)
 
     # Compute the similarity
+    predicted_features = predicted_features.float().to(device)
     similarity = predicted_features @ index_features.T
-    sorted_indices = torch.topk(similarity, dim=-1, k=50).indices.cpu()
+    sorted_indices = torch.topk(similarity, dim=-1, k=min(50, len(index_names))).indices.cpu()
     sorted_index_names = np.array(index_names)[sorted_indices]
 
     # Generate prediction dicts
@@ -262,6 +268,8 @@ def main():
     args = parser.parse_args()
 
     if args.eval_type == 'oti':
+        if not args.exp_name:
+            parser.error('--exp-name is required for oti')
         experiment_path = PROJECT_ROOT / 'data' / "oti_pseudo_tokens" / args.dataset.lower() / 'test' / args.exp_name
 
         with open(experiment_path / 'hyperparameters.json') as f:
@@ -272,11 +280,15 @@ def main():
             ref_names_list = pickle.load(f)
 
         clip_model_name = hyperparameters['clip_model_name']
-        clip_model, clip_preprocess = clip.load(clip_model_name, device='cpu', jit=False)
+        args.clip_model_name = {'ViT-B/32': 'base', 'ViT-L/14': 'large'}.get(clip_model_name, clip_model_name)
+        args.mixed_precision = 'no'
+        image_encoder, clip_preprocess, text_encoder, tokenizer = build_text_encoder(args)
+        image_encoder = image_encoder.float().to(device).eval()
+        text_encoder = text_encoder.float().to(device).eval()
 
         if args.preprocess_type == 'targetpad':
             print('Target pad preprocess pipeline is used')
-            preprocess = targetpad_transform(1.25, clip_model.visual.input_resolution)
+            preprocess = targetpad_transform(1.25, image_encoder.config.image_size)
         elif args.preprocess_type == 'clip':
             print('CLIP preprocess pipeline is used')
             preprocess = clip_preprocess
@@ -286,7 +298,7 @@ def main():
 
     elif args.eval_type in ['phi', 'searle', 'searle-xl', 'pic2word']:
         if args.eval_type == 'phi':
-            args.mixed_precision = 'fp16'
+            args.mixed_precision = 'fp16' if device.type == 'cuda' else 'no'
             image_encoder, clip_preprocess, text_encoder, tokenizer = build_text_encoder(args)
 
             phi = Phi(input_dim=text_encoder.config.projection_dim,
@@ -300,7 +312,7 @@ def main():
             phi = phi.eval()
 
         elif args.eval_type == 'pic2word':
-            args.mixed_precision = 'fp16'
+            args.mixed_precision = 'fp16' if device.type == 'cuda' else 'no'
             image_encoder, clip_preprocess, text_encoder, tokenizer = build_text_encoder(args)
 
             phi = PIC2WORD(embed_dim=text_encoder.config.projection_dim,
@@ -320,11 +332,13 @@ def main():
                                     backbone=clip_model_name)
 
             phi = phi.to(device).eval()
-            clip_model, clip_preprocess = clip.load(clip_model_name, device=device, jit=False)
+            args.clip_model_name = 'base' if clip_model_name == 'ViT-B/32' else 'large'
+            args.mixed_precision = 'no'
+            image_encoder, clip_preprocess, text_encoder, tokenizer = build_text_encoder(args)
 
         if args.preprocess_type == 'targetpad':
             print('Target pad preprocess pipeline is used')
-            preprocess = targetpad_transform(1.25, clip_model.visual.input_resolution)
+            preprocess = targetpad_transform(1.25, image_encoder.config.image_size)
         elif args.preprocess_type == 'clip':
             print('CLIP preprocess pipeline is used')
             preprocess = clip_preprocess
@@ -339,8 +353,8 @@ def main():
             raise ValueError("Dataset not supported")
 
         #clip_model = clip_model.float().to(device)
-        image_encoder = image_encoder.float().to(device)
-        text_encoder = text_encoder.float().to(device)
+        image_encoder = image_encoder.float().to(device).eval()
+        text_encoder = text_encoder.float().to(device).eval()
         pseudo_tokens, ref_names_list = extract_pseudo_tokens_with_phi(image_encoder, phi, relative_test_dataset, args)
         pseudo_tokens = pseudo_tokens.to(device)
     else:

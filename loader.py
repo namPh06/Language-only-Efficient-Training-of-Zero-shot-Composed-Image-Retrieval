@@ -12,12 +12,27 @@ from pathlib import Path
 from typing import List, Optional, Union, Dict, Literal
 import PIL
 import PIL.Image
+import PIL.ImageOps
+import inspect
 import torch
 from torch.utils.data import Dataset
 import webdataset as wds
 import spacy
 import numpy as np
 import datasets
+
+
+
+def preprocess_image(preprocess, path):
+    # HF processors and torchvision transforms expose different call signatures.
+    # Keep file handles local to the worker and orient both paths consistently.
+    with PIL.Image.open(path) as source:
+        image = PIL.ImageOps.exif_transpose(source).convert('RGB')
+        signature = inspect.signature(preprocess)
+        accepts_kwargs = 'return_tensors' in signature.parameters or any(
+            p.kind == inspect.Parameter.VAR_KEYWORD for p in signature.parameters.values())
+        result = preprocess(image, return_tensors='pt') if accepts_kwargs else preprocess(image)
+    return result['pixel_values'][0] if isinstance(result, dict) or hasattr(result, 'keys') else result
 
 
 def extract_keywords(spacy_nlp, caption):
@@ -217,6 +232,7 @@ def build_loader(args, tokenizer, accelerator):
                 print('Downloading captions is required')
                 db = datasets.load_dataset(v, cache_dir=os.path.join('./datasets', k))
 
+    accelerator.wait_for_everyone()
     captions = []
     for k, v in data_names.items():
         db = datasets.load_dataset(v, cache_dir=os.path.join('./datasets', k))
@@ -305,10 +321,10 @@ class FashionIQDataset(Dataset):
 
                 if self.split in ['train', 'val']:
                     reference_image_path = self.dataset_path / 'images' / f"{reference_name}.jpg"
-                    reference_image = self.preprocess(PIL.Image.open(reference_image_path), return_tensors='pt')['pixel_values'][0]
+                    reference_image = preprocess_image(self.preprocess, reference_image_path)
                     target_name = self.triplets[index]['target']
                     target_image_path = self.dataset_path / 'images' / f"{target_name}.jpg"
-                    target_image = self.preprocess(PIL.Image.open(target_image_path), return_tensors='pt')['pixel_values'][0]
+                    target_image = preprocess_image(self.preprocess, target_image_path)
 
                     return {
                         'reference_image': reference_image,
@@ -320,7 +336,7 @@ class FashionIQDataset(Dataset):
 
                 elif self.split == 'test':
                     reference_image_path = self.dataset_path / 'images' / f"{reference_name}.jpg"
-                    reference_image = self.preprocess(PIL.Image.open(reference_image_path), return_tensors='pt')['pixel_values'][0]
+                    reference_image = preprocess_image(self.preprocess, reference_image_path)
 
                     return {
                         'reference_image': reference_image,
@@ -331,7 +347,7 @@ class FashionIQDataset(Dataset):
             elif self.mode == 'classic':
                 image_name = self.image_names[index]
                 image_path = self.dataset_path / 'images' / f"{image_name}.jpg"
-                image = self.preprocess(PIL.Image.open(image_path), return_tensors='pt')['pixel_values'][0]
+                image = preprocess_image(self.preprocess, image_path)
 
                 return {
                     'image': image,
@@ -412,6 +428,7 @@ class CIRRDataset(Dataset):
         # get a mapping from image name to relative path
         with open(dataset_path / 'cirr' / 'image_splits' / f'split.rc2.{split}.json') as f:
             self.name_to_relpath = json.load(f)
+        self.image_names = list(self.name_to_relpath)
 
         print(f"CIRR {split} dataset in {mode} mode initialized")
 
@@ -424,10 +441,10 @@ class CIRRDataset(Dataset):
 
                 if self.split in ['train', 'val']:
                     reference_image_path = self.dataset_path / self.name_to_relpath[reference_name]
-                    reference_image = self.preprocess(PIL.Image.open(reference_image_path), return_tensors='pt')['pixel_values'][0]
+                    reference_image = preprocess_image(self.preprocess, reference_image_path)
                     target_hard_name = self.triplets[index]['target_hard']
                     target_image_path = self.dataset_path / self.name_to_relpath[target_hard_name]
-                    target_image = self.preprocess(PIL.Image.open(target_image_path), return_tensors='pt')['pixel_values'][0]
+                    target_image = preprocess_image(self.preprocess, target_image_path)
 
                     return {
                         'reference_image': reference_image,
@@ -441,7 +458,7 @@ class CIRRDataset(Dataset):
                 elif self.split == 'test1':
                     pair_id = self.triplets[index]['pairid']
                     reference_image_path = self.dataset_path / self.name_to_relpath[reference_name]
-                    reference_image = self.preprocess(PIL.Image.open(reference_image_path), return_tensors='pt')['pixel_values'][0]
+                    reference_image = preprocess_image(self.preprocess, reference_image_path)
                     return {
                         'reference_image': reference_image,
                         'reference_name': reference_name,
@@ -451,10 +468,9 @@ class CIRRDataset(Dataset):
                     }
 
             elif self.mode == 'classic':
-                image_name = list(self.name_to_relpath.keys())[index]
+                image_name = self.image_names[index]
                 image_path = self.dataset_path / self.name_to_relpath[image_name]
-                im = PIL.Image.open(image_path)
-                image = self.preprocess(im, return_tensors='pt')['pixel_values'][0]
+                image = preprocess_image(self.preprocess, image_path)
 
                 return {
                     'image': image,
@@ -568,14 +584,14 @@ class CIRCODataset(Dataset):
             # Get the reference image
             reference_img_id = str(self.annotations[index]['reference_img_id'])
             reference_img_path = self.img_paths[self.img_ids_indexes_map[reference_img_id]]
-            reference_img = self.preprocess(PIL.Image.open(reference_img_path), return_tensors='pt')['pixel_values'][0]
+            reference_img = preprocess_image(self.preprocess, reference_img_path)
 
             if self.split == 'val':
                 # Get the target image and ground truth images
                 target_img_id = str(self.annotations[index]['target_img_id'])
                 gt_img_ids = [str(x) for x in self.annotations[index]['gt_img_ids']]
                 target_img_path = self.img_paths[self.img_ids_indexes_map[target_img_id]]
-                target_img = self.preprocess(PIL.Image.open(target_img_path), return_tensors='pt')['pixel_values'][0]
+                target_img = preprocess_image(self.preprocess, target_img_path)
 
                 # Pad ground truth image IDs with zeros for collate_fn
                 gt_img_ids += [''] * (self.max_num_gts - len(gt_img_ids))
@@ -606,7 +622,7 @@ class CIRCODataset(Dataset):
             img_path = self.img_paths[index]
 
             # Preprocess image and return
-            img = self.preprocess(PIL.Image.open(img_path), return_tensors='pt')['pixel_values'][0]
+            img = preprocess_image(self.preprocess, img_path)
             return {
                 'image': img,
                 'image_name': img_id

@@ -21,6 +21,8 @@ def collate_fn(batch):
     :return: output_batch = input_batch - None_values
     '''
     batch = list(filter(lambda x: x is not None, batch))
+    if not batch:
+        raise ValueError("All samples in this batch are unreadable; fix the dataset before evaluation")
     return torch.utils.data.dataloader.default_collate(batch)
 
 
@@ -35,6 +37,8 @@ class TargetPad:
         :param target_ratio: target ratio
         :param size: preprocessing output dimension
         """
+        if not isinstance(size, int) or size <= 0 or not 1 <= target_ratio < float("inf"):
+            raise ValueError("TargetPad requires a positive size and finite ratio >= 1")
         self.size = size
         self.target_ratio = target_ratio
 

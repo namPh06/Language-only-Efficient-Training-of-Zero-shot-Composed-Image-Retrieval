@@ -1,0 +1,38 @@
+{
+  "clip": {
+    "repo": "openai/clip-vit-large-patch14",
+    "revision": "32bd64288804d66eefd0ccbe215aa642df71cc41"
+  },
+  "tokenizer": {
+    "repo": "stabilityai/stable-diffusion-xl-base-1.0",
+    "revision": "462165984030d82259a11f4367a4eed129e94a7b"
+  },
+  "checkpoints": [
+    {
+      "repo": "navervision/zeroshot-cir-models",
+      "revision": "5118df4683de6efa09f8e5336d86ca626ed21c44",
+      "filename": "lincir_large.pt",
+      "destination": "pretrained_models/lincir_large.pt",
+      "sha256": "5ba98d52db7a5e9a78f9ba7436991235477b89544caf246e4659642bf9b409bd"
+    },
+    {
+      "repo": "iLearn-Lab/SIGIR24-FTI4CIR",
+      "revision": "27eb6223124cf8a73e05647ef9932bb1042b30ed",
+      "filename": "FTI4CIR_model.pth",
+      "destination": "experiments/fti4cir/FTI4CIR_model.pth",
+      "sha256": "aa1acd03fba4e70f77b6afbf296f849e58dddcb899f05e613bf677435ff1a967"
+    }
+  ],
+  "sources": [
+    {
+      "url": "https://raw.githubusercontent.com/iLearn-Lab/SIGIR24-FTI4CIR/70159e6ee1fa7e84256f365f4e93a93d4942a4ce/src/MHTransformer.py",
+      "destination": "experiments/fti4cir/MHTransformer.py",
+      "sha256": "39057c9271b12d552c1e7f46cb52409dde49b4176b7657246c6a1f06c6df4324"
+    },
+    {
+      "url": "https://raw.githubusercontent.com/iLearn-Lab/SIGIR24-FTI4CIR/70159e6ee1fa7e84256f365f4e93a93d4942a4ce/src/i2t_model.py",
+      "destination": "experiments/fti4cir/i2t_model.py",
+      "sha256": "dd5fa0fa3eeec5a7a761bc9984b366071a42c1414fb660add1fd41782c1dab29"
+    }
+  ]
+}

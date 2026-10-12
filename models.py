@@ -3,14 +3,23 @@ LinCIR
 Copyright (c) 2023-present NAVER Corp.
 CC BY-NC-4.0 (https://creativecommons.org/licenses/by-nc/4.0/)
 '''
+import copy
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from transformers import CLIPTextModelWithProjection, CLIPVisionModelWithProjection, CLIPImageProcessor, CLIPTokenizer
 
 
 def build_text_encoder(args):
-    clip_model_dict = {'large': 'openai/clip-vit-large-patch14',
+    # Import image preprocessing only when this builder is used. Importing Phi
+    # for the demo must not initialize an unused torchvision-backed processor.
+    from transformers import CLIPTextModelWithProjection, CLIPVisionModelWithProjection, CLIPTokenizer
+    try:
+        from transformers import CLIPImageProcessorPil as CLIPImageProcessor
+    except ImportError:
+        from transformers import CLIPImageProcessor
+    clip_model_dict = {'base': 'openai/clip-vit-base-patch32',
+                       'large': 'openai/clip-vit-large-patch14',
                        'huge': 'laion/CLIP-ViT-H-14-laion2B-s32B-b79K',
                        'giga': 'Geonmo/CLIP-Giga-config-fixed',
                        }
@@ -34,6 +43,7 @@ def build_text_encoder(args):
     tokenizer = CLIPTokenizer.from_pretrained('stabilityai/stable-diffusion-xl-base-1.0', subfolder='tokenizer_2', cache_dir=args.cache_dir)
     tokenizer.add_special_tokens({'additional_special_tokens':["[$]"]}) # NOTE: 49408
 
+    clip_text_model.retrieval_tokenizer = tokenizer
     return clip_vision_model, clip_preprocess, clip_text_model, tokenizer
 
 
@@ -72,12 +82,15 @@ class EMAModel:
 
         self.collected_params = None
 
+        if not math.isfinite(float(decay)) or not 0 <= decay <= 1:
+            raise ValueError("Decay must be finite and between 0 and 1")
         self.decay = decay
         self.optimization_step = 0
 
     @torch.no_grad()
     def step(self, parameters):
         parameters = list(parameters)
+        self._validate_parameters(parameters)
 
         self.optimization_step += 1
 
@@ -91,7 +104,6 @@ class EMAModel:
             else:
                 s_param.copy_(param)
 
-        torch.cuda.empty_cache()
 
     def copy_to(self, parameters) -> None:
         """
@@ -103,8 +115,14 @@ class EMAModel:
                 initialized will be used.
         """
         parameters = list(parameters)
+        self._validate_parameters(parameters)
         for s_param, param in zip(self.shadow_params, parameters):
             param.data.copy_(s_param.data)
+
+    def _validate_parameters(self, parameters):
+        if len(parameters) != len(self.shadow_params) or any(
+                p.shape != s.shape for p, s in zip(parameters, self.shadow_params)):
+            raise ValueError('EMA parameters do not match the model')
 
     def to(self, device=None, dtype=None) -> None:
         r"""Move internal buffers of the ExponentialMovingAverage to `device`.
@@ -140,31 +158,26 @@ class EMAModel:
             state_dict (dict): EMA state. Should be an object returned
                 from a call to :meth:`state_dict`.
         """
-        # deepcopy, to be consistent with module API
-        state_dict = copy.deepcopy(state_dict)
+        # Validate the whole state before mutating the current EMA.
+        state = copy.deepcopy(state_dict)
+        decay = state['decay']
+        step = state['optimization_step']
+        shadow = state['shadow_params']
+        collected = state['collected_params']
+        if not isinstance(decay, (int, float)) or not math.isfinite(decay) or not 0 <= decay <= 1:
+            raise ValueError('Decay must be finite and between 0 and 1')
+        if not isinstance(step, int) or isinstance(step, bool) or step < 0:
+            raise ValueError('Invalid optimization_step')
+        if not isinstance(shadow, list) or not all(isinstance(p, torch.Tensor) for p in shadow):
+            raise ValueError('shadow_params must be a list of Tensors')
+        self._validate_parameters(shadow)
+        if collected is not None:
+            if not isinstance(collected, list) or not all(isinstance(p, torch.Tensor) for p in collected):
+                raise ValueError('collected_params must be a list of Tensors')
+            self._validate_parameters(collected)
+        self.decay, self.optimization_step = decay, step
+        self.shadow_params, self.collected_params = shadow, collected
 
-        self.decay = state_dict["decay"]
-        if self.decay < 0.0 or self.decay > 1.0:
-            raise ValueError("Decay must be between 0 and 1")
-
-        self.optimization_step = state_dict["optimization_step"]
-        if not isinstance(self.optimization_step, int):
-            raise ValueError("Invalid optimization_step")
-
-        self.shadow_params = state_dict["shadow_params"]
-        if not isinstance(self.shadow_params, list):
-            raise ValueError("shadow_params must be a list")
-        if not all(isinstance(p, torch.Tensor) for p in self.shadow_params):
-            raise ValueError("shadow_params must all be Tensors")
-
-        self.collected_params = state_dict["collected_params"]
-        if self.collected_params is not None:
-            if not isinstance(self.collected_params, list):
-                raise ValueError("collected_params must be a list")
-            if not all(isinstance(p, torch.Tensor) for p in self.collected_params):
-                raise ValueError("collected_params must all be Tensors")
-            if len(self.collected_params) != len(self.shadow_params):
-                raise ValueError("collected_params and shadow_params must have the same length")
 
 
 class PIC2WORD(nn.Module):

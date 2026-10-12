@@ -3,10 +3,12 @@ LinCIR
 Copyright (c) 2023-present NAVER Corp.
 CC BY-NC-4.0 (https://creativecommons.org/licenses/by-nc/4.0/)
 '''
+import copy
 import json
 import os
 import pickle
 import random
+import tempfile
 import math
 from argparse import ArgumentParser
 from pathlib import Path
@@ -76,6 +78,24 @@ def parse_args():
 
     args = parser.parse_args()
 
+    for name in ('max_train_steps', 'batch_size', 'gradient_accumulation_steps'):
+        if getattr(args, name) <= 0:
+            parser.error(f'--{name} must be positive')
+    for name in ('validation_steps', 'checkpointing_steps'):
+        value = getattr(args, name)
+        if value is not None and value <= 0:
+            parser.error(f'--{name} must be positive when provided')
+    if args.num_workers < 0 or args.lr_warmup_steps < 0:
+        parser.error('Worker count and warmup steps must be nonnegative')
+    if not math.isfinite(args.learning_rate) or args.learning_rate <= 0:
+        parser.error('Learning rate must be finite and positive')
+    if not math.isfinite(args.weight_decay) or args.weight_decay < 0:
+        parser.error('Weight decay must be finite and nonnegative')
+    if not 0 <= args.phi_dropout <= 1:
+        parser.error('Dropout must be in [0, 1]')
+    if args.max_grad_norm is not None and (not math.isfinite(args.max_grad_norm) or args.max_grad_norm <= 0):
+        parser.error('Maximum gradient norm must be finite and positive')
+
     env_local_rank = int(os.environ.get("LOCAL_RANK", -1))
     if env_local_rank != -1 and env_local_rank != args.local_rank:
         args.local_rank = env_local_rank
@@ -90,10 +110,20 @@ def save_phi(name: str, cur_epoch: int, model_to_save: Phi, training_path: Path)
     models_path = os.path.join(training_path, "checkpoints")
     os.makedirs(models_path, exist_ok=True)
     model_name = model_to_save.__class__.__name__
-    torch.save({
-        'epoch': cur_epoch,
-        model_name: model_to_save.state_dict(),
-    }, os.path.join(models_path, f'{name}.pt'))
+    target = Path(models_path) / f'{name}.pt'
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(dir=models_path, suffix='.tmp', delete=False) as handle:
+            temporary = Path(handle.name)
+        torch.save({'epoch': cur_epoch, model_name: model_to_save.state_dict()}, temporary)
+        os.replace(temporary, target)
+    finally:
+        if temporary is not None:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+
 
 
 def train_phi(args):
@@ -106,6 +136,7 @@ def train_phi(args):
             mixed_precision=args.mixed_precision,
             log_with=args.report_to,
             project_dir=logging_dir,
+            step_scheduler_with_optimizer=False,
     )
 
     os.makedirs(args.output_dir, exist_ok=True)
@@ -149,14 +180,15 @@ def train_phi(args):
     image_encoder.to(accelerator.device, dtype=weight_dtype)
     text_encoder.to(accelerator.device, dtype=weight_dtype)
 
+    image_encoder.eval()
+    text_encoder.eval()
     image_encoder.requires_grad_(False)
     text_encoder.requires_grad_(False)
 
     if args.use_ema:
-        import copy
         ema_phi = copy.deepcopy(phi)
         ema_phi = EMAModel(ema_phi.parameters())
-        ema_phi.to(accelerator.device, dtype=weight_dtype)
+        ema_phi.to(accelerator.device)
 
     ### Define the train datasets
     print('pytorch loader')
@@ -190,8 +222,8 @@ def train_phi(args):
     lr_scheduler = get_scheduler(
             args.lr_scheduler,
             optimizer=optimizer,
-            num_warmup_steps=args.lr_warmup_steps * args.gradient_accumulation_steps * accelerator.num_processes,
-            num_training_steps=args.max_train_steps * args.gradient_accumulation_steps * accelerator.num_processes,
+            num_warmup_steps=args.lr_warmup_steps,
+            num_training_steps=args.max_train_steps,
     )
 
     phi, optimizer, lr_scheduler, train_dataset = accelerator.prepare(
@@ -220,40 +252,44 @@ def train_phi(args):
     progress_bar.set_description("Steps")
 
     while True:
+        had_batches = False
         for idx, (original_tokens, replaced_tokens, indicators) in enumerate(train_dataset):
-            original_tokens = original_tokens.to(accelerator.device)
-            replaced_tokens = replaced_tokens.to(accelerator.device)
+            had_batches = True
+            with accelerator.accumulate(phi):
+                original_tokens = original_tokens.to(accelerator.device)
+                replaced_tokens = replaced_tokens.to(accelerator.device)
 
-            org = text_encoder(input_ids=original_tokens)
-            original_text_embeddings, original_last_hidden_states = org.text_embeds, org.last_hidden_state
-            input_features = original_text_embeddings.clone()
-            input_features += 1.0 * torch.rand(input_features.shape[0], device=input_features.device).unsqueeze(-1) * torch.randn(input_features.shape, device=input_features.device)
+                org = text_encoder(input_ids=original_tokens)
+                original_text_embeddings, original_last_hidden_states = org.text_embeds, org.last_hidden_state
+                input_features = original_text_embeddings.clone()
+                input_features += 1.0 * torch.rand(input_features.shape[0], device=input_features.device).unsqueeze(-1) * torch.randn(input_features.shape, device=input_features.device)
 
-            # normalize test
-            if args.l2_normalize:
-                input_features = F.normalize(input_features, dim=-1)
-            #################
+                # normalize test
+                if args.l2_normalize:
+                    input_features = F.normalize(input_features, dim=-1)
+                #################
 
-            estimated_token_embeddings = phi(input_features)
+                estimated_token_embeddings = phi(input_features)
 
-            replaced_text_embeddings, replaced_last_hidden_states = encode_with_pseudo_tokens_HF(text_encoder, replaced_tokens, estimated_token_embeddings, return_last_states=True)
+                replaced_text_embeddings, replaced_last_hidden_states = encode_with_pseudo_tokens_HF(text_encoder, replaced_tokens, estimated_token_embeddings, return_last_states=True)
 
-            loss = F.mse_loss(replaced_text_embeddings.float(), original_text_embeddings.float(), reduction="mean")
+                loss = F.mse_loss(replaced_text_embeddings.float(), original_text_embeddings.float(), reduction="mean")
 
-            avg_loss = accelerator.gather(loss.repeat(args.batch_size)).mean()
-            train_loss += avg_loss.item() / args.gradient_accumulation_steps
+                avg_loss = accelerator.gather(loss.repeat(args.batch_size)).mean()
+                train_loss += avg_loss.item() / args.gradient_accumulation_steps
 
-            # Backpropagation
-            accelerator.backward(loss)
-            if accelerator.sync_gradients and args.max_grad_norm is not None:
-                accelerator.clip_grad_norm_(phi.parameters(), arg.max_grad_norm)
-            optimizer.step()
-            lr_scheduler.step()
-            optimizer.zero_grad()
+                # Backpropagation
+                accelerator.backward(loss)
+                if accelerator.sync_gradients and args.max_grad_norm is not None:
+                    accelerator.clip_grad_norm_(phi.parameters(), args.max_grad_norm)
+                optimizer.step()
+                if accelerator.sync_gradients and not accelerator.optimizer_step_was_skipped:
+                    lr_scheduler.step()
+                optimizer.zero_grad()
             
             if accelerator.sync_gradients:
                 if args.use_ema:
-                    ema_phi.step(phi.module.parameters())
+                    ema_phi.step(accelerator.unwrap_model(phi).parameters())
                 progress_bar.update(1)
                 global_step += 1
                 accelerator.log({"train/train_loss": train_loss}, step=global_step)
@@ -266,13 +302,14 @@ def train_phi(args):
                         logger.info(f"model saving... step: {global_step}")
                         save_phi(f"phi_{global_step:09}", global_step, accelerator.unwrap_model(phi), args.output_dir)
                         save_phi(f"phi_latest", global_step, accelerator.unwrap_model(phi), args.output_dir)
-                    if args.use_ema:
-                        phi_for_saving = copy.deepcopy(accelerator.unwrap_model(phi))
-                        ema_phi.copy_to(phi_for_saving.parameters())
-                        save_phi(f"ema_phi_{global_step:09}", global_step, phi_for_saving, args.output_dir)
-                        save_phi(f"ema_phi_latest", global_step, phi_for_saving, args.output_dir)
+                        if args.use_ema:
+                            phi_for_saving = copy.deepcopy(accelerator.unwrap_model(phi))
+                            ema_phi.copy_to(phi_for_saving.parameters())
+                            save_phi(f"ema_phi_{global_step:09}", global_step, phi_for_saving, args.output_dir)
+                            save_phi(f"ema_phi_latest", global_step, phi_for_saving, args.output_dir)
 
                 if args.validation_steps and (global_step % args.validation_steps == 0 or global_step == 50):
+                    accelerator.wait_for_everyone()
                     if accelerator.is_main_process:
                         logger.info(f"evaluate model... step: {global_step}")
 
@@ -280,7 +317,7 @@ def train_phi(args):
                             phi_for_eval = copy.deepcopy(accelerator.unwrap_model(phi))
                             ema_phi.copy_to(phi_for_eval.parameters())
                         else:
-                            phi_for_eval = phi
+                            phi_for_eval = accelerator.unwrap_model(phi)
 
                         phi_for_eval.eval()
 
@@ -303,12 +340,16 @@ def train_phi(args):
                             if cirr_results_dict['cirr_recall_at1'] > best_recall:
                                 best_recall = cirr_results_dict['cirr_recall_at1']
                                 logger.info(f"best model saving... step: {global_step}")
-                                save_phi("phi_best", global_step, accelerator.unwrap_model(phi), args.output_dir)
+                                save_phi("phi_best", global_step, phi_for_eval, args.output_dir)
 
                         phi.train()
+                    accelerator.wait_for_everyone()
 
             if global_step >= args.max_train_steps:
-                exit()
+                accelerator.end_training()
+                return
+        if not had_batches:
+            raise RuntimeError("Training dataset yielded no batches; check the input shards and batch size.")
 
 
 if __name__ == '__main__':

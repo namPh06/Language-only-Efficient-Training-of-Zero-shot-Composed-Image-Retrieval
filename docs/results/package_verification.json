@@ -1,0 +1,86 @@
+{
+  "asset_check": "PASS",
+  "syntax_check": "PASS",
+  "zip_audit": "no models/images/cache/environments",
+  "runtime_smoke_queries": 5,
+  "runtime_gallery_count": 123403,
+  "snapshot_verified": true,
+  "parity_checks": [
+    {
+      "query_id": 0,
+      "mode": "baseline",
+      "top50_unchanged": true
+    },
+    {
+      "query_id": 0,
+      "mode": "gated",
+      "top50_unchanged": true
+    },
+    {
+      "query_id": 0,
+      "mode": "fti_clip",
+      "top50_unchanged": true
+    },
+    {
+      "query_id": 1,
+      "mode": "baseline",
+      "top50_unchanged": true
+    },
+    {
+      "query_id": 1,
+      "mode": "gated",
+      "top50_unchanged": true
+    },
+    {
+      "query_id": 1,
+      "mode": "fti_clip",
+      "top50_unchanged": true
+    },
+    {
+      "query_id": 2,
+      "mode": "baseline",
+      "top50_unchanged": true
+    },
+    {
+      "query_id": 2,
+      "mode": "gated",
+      "top50_unchanged": true
+    },
+    {
+      "query_id": 2,
+      "mode": "fti_clip",
+      "top50_unchanged": true
+    },
+    {
+      "query_id": 3,
+      "mode": "baseline",
+      "top50_unchanged": true
+    },
+    {
+      "query_id": 3,
+      "mode": "gated",
+      "top50_unchanged": true
+    },
+    {
+      "query_id": 3,
+      "mode": "fti_clip",
+      "top50_unchanged": true
+    },
+    {
+      "query_id": 4,
+      "mode": "baseline",
+      "top50_unchanged": true
+    },
+    {
+      "query_id": 4,
+      "mode": "gated",
+      "top50_unchanged": true
+    },
+    {
+      "query_id": 4,
+      "mode": "fti_clip",
+      "top50_unchanged": true
+    }
+  ],
+  "note": "Smoke regression only; historical full220 metrics remain separate. Clean pip installation on another machine not performed."
+}

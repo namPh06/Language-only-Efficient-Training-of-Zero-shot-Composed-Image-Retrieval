@@ -1,8 +1,8 @@
 from typing import Optional, Tuple, List
 
+import math
 import torch
 import torch.nn.functional as F
-from clip.model import CLIP
 from transformers import CLIPVisionModelWithProjection
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
@@ -39,6 +39,8 @@ def extract_image_features(dataset: Dataset, clip_model: CLIPVisionModelWithProj
 
     # Extract features
     for batch in tqdm(loader):
+        if batch is None:
+            continue
         images = batch.get('image')
         names = batch.get('image_name')
         if images is None:
@@ -52,24 +54,31 @@ def extract_image_features(dataset: Dataset, clip_model: CLIPVisionModelWithProj
             index_features.append(batch_features.cpu())
             index_names.extend(names)
 
+    if not index_features:
+        raise ValueError("Dataset contains no usable images")
     index_features = torch.vstack(index_features)
     return index_features, index_names
 
 
 def contrastive_loss(v1: torch.Tensor, v2: torch.Tensor, temperature: float) -> torch.Tensor:
-    # Based on https://github.com/NVlabs/PALAVRA/blob/main/utils/nv.py
-    v1 = F.normalize(v1, dim=1)
-    v2 = F.normalize(v2, dim=1)
+    # NT-Xent in log space, excluding self similarities from the denominator.
+    if v1.ndim != 2 or v1.shape != v2.shape or not len(v1) or not v1.shape[1]:
+        raise ValueError('Contrastive inputs must have the same nonempty N x D shape')
+    if v1.device != v2.device or not torch.isfinite(v1).all() or not torch.isfinite(v2).all():
+        raise ValueError('Contrastive inputs must be finite and on the same device')
+    if not math.isfinite(float(temperature)) or temperature <= 0:
+        raise ValueError('Temperature must be finite and positive')
+    work_dtype = torch.float64 if torch.float64 in (v1.dtype, v2.dtype) else torch.float32
+    joint = torch.cat((F.normalize(v1.to(work_dtype), dim=1), F.normalize(v2.to(work_dtype), dim=1)))
+    logits = (joint @ joint.T) / temperature
+    if not torch.isfinite(logits).all():
+        raise ValueError("Temperature is too small for the tensor precision")
+    count = len(joint)
+    logits = logits.masked_fill(torch.eye(count, dtype=torch.bool, device=joint.device), -torch.inf)
+    indices = torch.arange(count, device=joint.device)
+    positives = (indices + len(v1)) % count
+    return (torch.logsumexp(logits, dim=1) - logits[indices, positives]).mean()
 
-    numerator = torch.exp(torch.diag(torch.inner(v1, v2)) / temperature)
-    numerator = torch.cat((numerator, numerator), 0)
-    joint_vector = torch.cat((v1, v2), 0)
-    pairs_product = torch.exp(torch.mm(joint_vector, joint_vector.t()) / temperature)
-    denominator = torch.sum(pairs_product - pairs_product * torch.eye(joint_vector.shape[0]).to(device), 0)
-
-    loss = -torch.mean(torch.log(numerator / denominator))
-
-    return loss
 
 
 @torch.no_grad()
@@ -83,6 +92,8 @@ def extract_pseudo_tokens_with_phi(clip_model: CLIPVisionModelWithProjection, ph
     names_list = []
     print(f"Extracting tokens using phi model")
     for batch in tqdm(data_loader):
+        if batch is None:
+            continue
         images = batch.get('image')
         names = batch.get('image_name')
         if images is None:
@@ -90,14 +101,17 @@ def extract_pseudo_tokens_with_phi(clip_model: CLIPVisionModelWithProjection, ph
         if names is None:
             names = batch.get('reference_name')
 
-        images = images.to(device)
-        image_features = clip_model(pixel_values=images.half()).image_embeds
+        images = images.to(clip_model.device)
+        image_features = clip_model(pixel_values=images.to(clip_model.dtype)).image_embeds
         if args.l2_normalize:
             image_features = F.normalize(image_features, dim=-1)
-        batch_predicted_tokens = phi(image_features)
+        phi_parameter = next(phi.parameters())
+        batch_predicted_tokens = phi(image_features.to(device=phi_parameter.device, dtype=phi_parameter.dtype))
         predicted_tokens.append(batch_predicted_tokens.cpu())
         names_list.extend(names)
 
+    if not predicted_tokens:
+        raise ValueError("Dataset contains no usable images")
     predicted_tokens = torch.vstack(predicted_tokens)
     return predicted_tokens, names_list
 
@@ -113,6 +127,8 @@ def extract_image_features_with_names(clip_model: CLIPVisionModelWithProjection,
     names_list = []
     print(f"Extracting tokens using phi model")
     for batch in tqdm(data_loader):
+        if batch is None:
+            continue
         images = batch.get('image')
         names = batch.get('image_name')
         if images is None:
@@ -120,7 +136,7 @@ def extract_image_features_with_names(clip_model: CLIPVisionModelWithProjection,
         if names is None:
             names = batch.get('reference_name')
 
-        images = images.to(device)
+        images = images.to(clip_model.device)
         image_features = clip_model(pixel_values=images.to(clip_model.dtype)).image_embeds
 
         #batch_predicted_tokens = phi(image_features)
@@ -128,6 +144,8 @@ def extract_image_features_with_names(clip_model: CLIPVisionModelWithProjection,
         predicted_tokens.append(batch_predicted_tokens.cpu())
         names_list.extend(names)
 
+    if not predicted_tokens:
+        raise ValueError("Dataset contains no usable images")
     predicted_tokens = torch.vstack(predicted_tokens)
     return predicted_tokens, names_list
 
@@ -137,6 +155,8 @@ class CustomTensorDataset(Dataset):
     """
 
     def __init__(self, images: torch.Tensor, names: torch.Tensor):
+        if len(images) != len(names):
+            raise ValueError("Image features and names must have matching lengths")
         self.images = images
         self.names = names
 

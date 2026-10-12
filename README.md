@@ -1,197 +1,135 @@
-## LinCIR: Language-only Training of Zero-shot Composed Image Retrieval (CVPR 2024)
+# Tìm kiếm ảnh từ ảnh tham chiếu và mô tả — LinCIR, gated, FTI
 
-[![arXiv](https://img.shields.io/badge/arXiv%20papr-2312.01998-b31b1b.svg)](https://arxiv.org/abs/2312.01998)
-[![demo](https://img.shields.io/badge/Demo-Link-blue.svg)](https://huggingface.co/spaces/navervision/LinCIR)
+Project của nhóm môn Xử lý ảnh: đưa vào **ảnh tham chiếu + mô tả thay đổi bằng tiếng Anh**, tìm ảnh phù hợp đã có trong kho. Hệ thống không sinh hoặc chỉnh sửa ảnh. Có ba phiên bản: LinCIR gốc, gated (truy vấn thích ứng và kết hợp điểm có giới hạn), FTI (token chủ thể và thuộc tính từ checkpoint FTI4CIR).
 
-[![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/language-only-efficient-training-of-zero-shot/zero-shot-composed-image-retrieval-zs-cir-on-2)](https://paperswithcode.com/sota/zero-shot-composed-image-retrieval-zs-cir-on-2?p=language-only-efficient-training-of-zero-shot) \
-[![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/language-only-efficient-training-of-zero-shot/zero-shot-composed-image-retrieval-zs-cir-on)](https://paperswithcode.com/sota/zero-shot-composed-image-retrieval-zs-cir-on?p=language-only-efficient-training-of-zero-shot) \
-[![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/language-only-efficient-training-of-zero-shot/zero-shot-composed-image-retrieval-zs-cir-on-1)](https://paperswithcode.com/sota/zero-shot-composed-image-retrieval-zs-cir-on-1?p=language-only-efficient-training-of-zero-shot)
+## 1. Cài đặt sau khi clone/pull
 
-By combining LinCIR with [RTD](https://arxiv.org/abs/2406.09188), we can achieve:
+Các lệnh dưới đây chạy trong thư mục chứa README. Thay `<URL_REPO_NHOM>` bằng URL GitHub của nhóm.
 
-[![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/reducing-task-discrepancy-of-text-encoders/zero-shot-composed-image-retrieval-zs-cir-on-2)](https://paperswithcode.com/sota/zero-shot-composed-image-retrieval-zs-cir-on-2?p=reducing-task-discrepancy-of-text-encoders) \
-[![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/reducing-task-discrepancy-of-text-encoders/zero-shot-composed-image-retrieval-zs-cir-on)](https://paperswithcode.com/sota/zero-shot-composed-image-retrieval-zs-cir-on?p=reducing-task-discrepancy-of-text-encoders) \
-[![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/reducing-task-discrepancy-of-text-encoders/zero-shot-composed-image-retrieval-zs-cir-on-1)](https://paperswithcode.com/sota/zero-shot-composed-image-retrieval-zs-cir-on-1?p=reducing-task-discrepancy-of-text-encoders)
-
-
-Welcome to the official Pytorch implementation of LinCIR!
-
-Discover the magic of **LinCIR**, a ground-breaking approach to Composed Image Retrieval (CIR) that challenges convention and ushers in a new era of AI research. Dive into the limitless possibilities of zero-shot composed image retrieval with us!
-
-**Authors**: 
-
-**[Geonmo Gu](https://geonm.github.io/)\*<sup>1</sup>, [Sanghyuk Chun](https://sanghyukchun.github.io/home/)\*<sup>2</sup>, [Wonjae Kim](https://wonjae.kim)<sup>2</sup>, [Yoohoon Kang](https://www.linkedin.com/in/yoohoon-kang-59895644)<sup>1</sup>, [Sangdoo Yun](https://sangdooyun.github.io)<sup>2</sup>**
-
-<sup>1</sup> NAVER Vision <sup>2</sup> NAVER AI Lab
-
-\* First two authors contributed equally.
-
-## ⭐ Overview
-<img src=".github/figure_001.png" height="256">
-
-The Composed Image Retrieval (CIR) task, a fusion of image and text, has always been an intriguing challenge for AI researchers. Traditional CIR methods require expensive triplets of query image, query text, and target image for training, limiting scalability.
-
-Enter LinCIR, a revolutionary CIR framework that relies solely on language for training. Our innovative approach leverages self-supervision through self-masking projection (SMP), allowing LinCIR to be trained using text datasets alone.
-
-With LinCIR, we achieve astonishing efficiency and effectiveness. For instance, LinCIR with a CLIP ViT-G backbone is trained in just 48 minutes and outperforms existing methods in zero-shot composed image retrieval on four benchmark datasets: CIRCO, GeneCIS, FashionIQ, and CIRR. In fact, it even surpasses supervised methods on FashionIQ!
-
-## 🚀 News
-- **February 27, 2024** - LinCIR is accepted at CVPR 2024!
-- **December 5, 2023** - LinCIR is officially released!
-
-## 🛠️ Installation
-Get started with LinCIR by installing the necessary dependencies:
-
-```bash
-$ pip install torch transformers diffusers accelerate datasets spacy
-$ python -m spacy download en_core_web_sm
+```powershell
+git clone <URL_REPO_NHOM>
+cd <TEN_THU_MUC_REPO>
+py -3.14 -m venv .venv
+.\.venv\Scripts\python.exe -m pip install --upgrade pip
+.\.venv\Scripts\python.exe -m pip install torch==2.14.0 --index-url https://download.pytorch.org/whl/cpu
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\python.exe setup_models.py
+.\.venv\Scripts\python.exe setup_models.py --check
 ```
 
-## 🤗 Demo based on LinCIR (VIT-L)
-Model file is here [LinCIR (VIT-L)](https://huggingface.co/navervision/zeroshot-cir-models/blob/main/lincir_large.pt).
+Môi trường đã kiểm chứng trên máy phát triển: Windows, Python 3.14, CPU; phiên bản thư viện được cố định trong requirements.txt. Không cần GPU hoặc train lại. Các nền tảng khác chưa được kiểm chứng đầy đủ. Trên Linux/macOS, tạo môi trường bằng `python3 -m venv .venv` và dùng `.venv/bin/python` thay cho đường dẫn Windows; chọn gói PyTorch phù hợp hệ điều hành.
 
-If you want to run and execute the demo directly, you can do so by running the script below.
+`setup_models.py` tải CLIP ViT-L/14, **chỉ tokenizer_2** của SDXL (không tải mô hình sinh ảnh SDXL), checkpoint LinCIR, checkpoint FTI và hai file nguồn FTI cần thiết. Các asset cố định theo revision/commit; checkpoint và nguồn FTI kiểm tra SHA256 trong model_manifest.json. Lần đầu cần Internet và vài GB dung lượng model/cache. Lần sau dùng model local.
 
-Of course, you can also experience the demo directly on the [Huggingface Space](https://huggingface.co/spaces/navervision/LinCIR).
+Cache mặc định: `hf_models/` trong project mới. Để tương thích máy phát triển, nếu Windows đã có `C:/hf_cache` thì dùng cache đó. Có thể đổi bằng `--cache_dir` ở demo local hoặc `--cache-dir` ở setup/benchmark, hoặc đặt cùng biến môi trường cho mọi lệnh:
 
-```bash
-$ pip intall clip-retrieval
-
-$ python demo.py
+```powershell
+$env:CIR_MODEL_CACHE = "D:\cir_model_cache"
+.\.venv\Scripts\python.exe setup_models.py
 ```
 
-Demo will be hosted at https://0.0.0.0:8000
+## 2. Demo thường — không cần tải CIRCO
 
-## 📂 Dataset Preparation
-No need to worry about downloading training datasets manually. All training datasets are automatically fetched using the Hugging Face datasets library.
-
-Keep in mind that the training datasets are considerably smaller in volume compared to (image, caption) pairs or triplet datasets like FashionIQ and CIRR. 
-
-Please refer to [here](https://github.com/miccunifi/SEARLE/tree/main#data-preparation) to prepare the benchmark datasets.
-
-## 📚 How to Train LinCIR
-Train LinCIR with ease using the following command:
-
-```bash
-$ python -m torch.distributed.run --nproc_per_node 8 --nnodes 1 --node_rank 0 \
---master_addr localhost --master_port 5100 train_phi.py \
---batch_size 64 \
---output_dir /path/to/your_experiment \
---cirr_dataset_path /path/to/cir_datasets/CIRR \
---mixed_precision fp16 \
---clip_model_name large \
---validation_steps 1000 \
---checkpointing_steps 1000 \
---seed 12345 \
---lr_scheduler constant_with_warmup --lr_warmup_steps 0 \
---max_train_steps 20000
+```powershell
+.\.venv\Scripts\python.exe demo_fti.py
 ```
 
-If you have a powerful GPU machine with 8 GPUs, simply run the above script. For less powerful GPU machine with single GPU, set `--nuproc_per_node` to 1 and adjust `--batch_size` to 256 or 512. Rest assured, the results will be consistent.
+Mở **http://127.0.0.1:8013/**. Thêm ảnh ứng viên vào `gallery/` hoặc qua giao diện. Chọn ảnh tham chiếu, nhập text như `wearing a blue shirt`, chọn số kết quả, rồi nhấn **So sánh cả ba phiên bản**. Có thể chọn ảnh đối chiếu để xem thứ hạng của ảnh đó.
 
-If you'd like to use ViT-Large, Huge or Giga as CLIP backbone, change `--clip_model_name` to large, huge, or giga each.
+- Cần có ảnh phù hợp trong kho. Không có ảnh đáp ứng thì hệ thống vẫn trả ảnh gần nhất.
+- Lần đầu mã hóa ảnh thành vector và lưu tại `outputs/index/`; thêm/sửa ảnh sẽ cập nhật phần cần thiết.
+- `Ảnh mới` đo cả mã hóa ảnh tham chiếu; `Ảnh dùng lại` chuẩn bị cache trước bộ đếm. Thời gian chuẩn bị được báo riêng.
+- Điểm tương đồng không phải xác suất chính xác. Mô hình có thể bỏ sót màu sắc, hoa văn nhỏ hoặc yêu cầu phức tạp.
 
-## 💯 How to Evaluate LinCIR
+Demo hai bản gốc/gated: `python demo.py` tại http://127.0.0.1:8000/. Nếu đã kích hoạt môi trường, có thể dùng `python` thay đường dẫn đầy đủ. Windows có `RUN_DEMO.cmd` chạy demo ba bản.
 
-### CIRR (Test Set)
-Evaluate LinCIR on the CIRR test set with the following command:
+## 3. Demo các ví dụ CIRCO đã chọn
 
-```bash
-$ python generate_test_submission.py \
---eval-type phi \
---dataset cirr \
---dataset-path /path/to/CIRR \
---phi-checkpoint-name /path/to/trained_your/phi_best.pt \
---clip_model_name large \
---submission-name lincir_results
+Cần đủ bộ dữ liệu CIRCO trước:
+
+```powershell
+.\.venv\Scripts\python.exe prepare_circo.py
+.\.venv\Scripts\python.exe prepare_circo.py --check
+.\.venv\Scripts\python.exe demo_circo_showcase.py
 ```
 
-Retrieved results will be saved as:
-- `./submission/cirr/{submission-name}.json`
-- `./submission/cirr/subset_{submission-name}.json`
+Chỉ chạy benchmark đầy đủ khi `ready: true`, `missing_images: 0`. Dữ liệu có **123.403 ảnh**, khoảng hơn 20 GB; nên dành tối thiểu 30 GB trống cho dữ liệu và dự phòng, chưa tính model. Công cụ tải có thể tiếp tục khi chạy lại. Không xóa ảnh sau khi tạo vector: demo và một số bước đánh giá vẫn cần ảnh.
 
-Upload these files [here](https://cirr.cecs.anu.edu.au/test_process/) to view the results.
+Mở **http://127.0.0.1:8015/**, cuộn xuống **Ví dụ CIRCO đã kiểm chứng**, chọn một hàng rồi nhấn nút so sánh phía trên. Có bốn ví dụ cải thiện và một ví dụ FTI thua. `docs/demo_cases.json` chứa ID ảnh và text, không chứa đường dẫn máy cá nhân. Demo CIRCO tái sử dụng `outputs/circo_index/`; máy mới phải tạo vector lần đầu. Không thêm ảnh vào kho CIRCO khi so sánh.
 
-### CIRR (Validation Set, Dev)
-For the CIRR validation set, use the following command:
+| Ví dụ | Hạng ảnh đích: gốc | gated | FTI |
+|---|---:|---:|---:|
+| Người ngồi ghế, ảnh đen trắng (query 8) | 7 | 2 | 1 |
+| Đồ ăn có thuyền và bầu trời phía sau (103) | 21 | 3 | 1 |
+| Ghế nhìn từ phía sau, có đồng hồ (199) | 43 | 26 | 1 |
+| Hai người đeo cà vạt xanh trong nhà (100) | Ngoài Top50 | Ngoài Top50 | 1 |
+| Ví dụ giới hạn (114) | 1 | 1 | 49 |
 
-```bash
-$ python validate.py \
---eval-type phi \
---dataset cirr \
---dataset-path /path/to/CIRR \
---phi-checkpoint-name /path/to/trained_your/phi_best.pt \
---clip_model_name large
+Các ví dụ được chọn để minh họa, không thay thế benchmark tổng hợp. Hạng là vị trí ảnh đích chuẩn; các ảnh ground truth khác cũng có thể đúng. Đổi sang kho nhỏ sẽ làm thứ hạng thay đổi.
+
+## 4. Benchmark cả ba phiên bản
+
+Thử nhanh 5 truy vấn trên toàn bộ kho:
+
+```powershell
+.\.venv\Scripts\python.exe -B -X utf8 benchmark_circo.py --modes baseline gated fti_clip --limit 5 --batch-size 1 --cpu-threads 1 --independent-latency --prepared-reference-latency --output outputs/circo_smoke.json
 ```
 
-### FashionIQ
-To evaluate LinCIR on FashionIQ, run the following command:
+Chạy đủ 220 truy vấn: bỏ `--limit 5`, đổi output sang `outputs/circo_three_versions.json`. Một lần chạy có giới hạn cứng **20 phút**, tính cả nạp model/tạo index. Máy mới chưa có vector có thể vượt giới hạn; chạy lại cùng lệnh để tiếp tục index. Không coi output chạy dở là benchmark đầy đủ. Chạy lại tiếp tục nếu cấu hình và mã giữ nguyên; thay mã/cấu hình thì dùng tên output mới.
 
-```bash
-$ python validate.py \
---eval-type phi \
---dataset fashioniq \
---dataset-path /path/to/fashioniq \
---phi-checkpoint-name /path/to/trained_your/phi_best.pt \
---clip_model_name large
+- `baseline`, `gated`, `fti_clip` là ba lựa chọn được duy trì.
+- `--prepared-reference-latency` đưa mã hóa tham chiếu ra ngoài bộ đếm; bỏ cờ để đo cả bước này. Không so thời gian giữa hai giao thức khác nhau.
+- `--independent-latency` xóa cache RAM giữa các bản; thứ tự chạy luân phiên.
+- `mAP@K` đo thứ hạng của nhiều ảnh đúng; `Recall@K` dùng ảnh đích chuẩn; `GTRecall@K` dùng toàn bộ ground truth.
+- Kết quả đầy đủ cần `partial: false`, `completed_queries: 220`, `snapshot_verified: true`.
+
+Số liệu lịch sử đã kiểm chứng, **không phải số liệu tự động đảm bảo trên mọi máy/kho**:
+
+| Phiên bản | mAP@10 | mAP@50 |
+|---|---:|---:|
+| LinCIR gốc | 14,04 | 16,26 |
+| gated | 16,66 | 19,02 |
+| FTI | 18,99 | 21,71 |
+
+Bằng chứng tại `docs/results/`. Đây là CIRCO **validation**, đã dùng trong phát triển; chưa phải test độc lập. FTI dùng tiền xử lý CLIP center-crop224 tương thích gallery, **không tái lập nguyên trạng cấu hình targetpad trong bài FTI**. Không khẳng định FTI thắng mọi truy vấn hoặc luôn đạt ngưỡng tốc độ +10%.
+
+## 5. Các thư mục và phần không đưa lên GitHub
+
+| Vị trí | Nội dung |
+|---|---|
+| `demo.py`, `demo_fti.py`, `demo_circo_showcase.py` | Giao diện local và so sánh CIRCO |
+| `upgraded_retrieval.py`, `fti_retrieval.py` | Hai nâng cấp được giữ |
+| `setup_models.py`, `model_manifest.json` | Tải/kiểm tra asset đúng phiên bản |
+| `prepare_circo.py`, `benchmark_circo.py` | Dữ liệu và đánh giá |
+| `docs/results/`, `docs/demo_cases.json` | Bằng chứng và ví dụ |
+| `docs/history/`, `docs/README_UPSTREAM.md` | Báo cáo trước và hướng dẫn nghiên cứu gốc |
+| `gallery/`, `benchmarks/` | Ảnh trên máy, bị Git bỏ qua |
+| `pretrained_models/`, `experiments/`, `hf_models/` | Model/nguồn tải về, bị Git bỏ qua |
+| `outputs/`, `.venv/`, `dist/` | Cache, kết quả mới, môi trường, gói ZIP; bị Git bỏ qua |
+
+Pull mã nguồn **không mang theo** model, ảnh hoặc vector. Mỗi thành viên chạy setup một lần; chỉ cần CIRCO nếu dùng demo/benchmark CIRCO. Khi đổi máy/đường dẫn, index có thể phải tạo lại vì cache kiểm tra đường dẫn, kích thước và thời gian sửa file.
+
+Mã train/evaluate gốc vẫn giữ để tham khảo. Chỉ cài `requirements-training.txt` và xem tài liệu upstream nếu cần nghiên cứu phần đó; nhánh training không nằm trong kiểm tra demo của nhóm.
+
+## 6. Cập nhật và đóng gói
+
+Sau khi pull: cài lại requirements nếu thay đổi, chạy `python setup_models.py --check`, rồi mở demo. Đóng gói mã nguồn đã chọn bằng:
+
+```powershell
+.\.venv\Scripts\python.exe package_project.py
 ```
 
-### CIRCO
-Evaluate LinCIR on the CIRCO dataset with the command below:
+Gói ZIP và danh sách SHA256 nằm trong `dist/`; không chứa `.git`, model, ảnh gallery/CIRCO, cache, log hoặc môi trường. Để đưa lên GitHub, dùng repository hiện tại, kiểm tra `git status`, commit mã/docs cần thiết rồi push lên repository nhóm. Không dùng `git add -f` với dữ liệu/model.
 
-```bash
-$ python generate_test_submission.py \
---eval-type phi \
---dataset circo \
---dataset-path /path/to/cir_datasets/CIRCO \
---phi-checkpoint-name /path/to/trained_your/phi_best.pt \
---clip_model_name large \
---submission-name lincir_results
-```
+## 7. Lỗi thường gặp
 
-Retrieved results will be saved as:
-- `./submission/circo/{submission-name}.json`
-- `./submission/circo/subset_{submission-name}.json`
+- Thiếu checkpoint/cache: chạy `python setup_models.py`; nếu dùng cache riêng, đặt cùng đường dẫn cho setup và demo.
+- Thiếu thư viện: xác nhận dùng Python của `.venv`, cài `requirements.txt`.
+- Cổng bận: thêm `--port 8016` vào lệnh demo.
+- CIRCO chưa sẵn sàng: chạy lại prepare và check; demo thường vẫn dùng được với kho riêng.
+- Lần đầu lâu: phải nạp model và tạo vector. `Get-Content ... -Wait` chỉ xem log, không phải tiến trình tải.
+- Số thứ hạng khác: kiểm tra cùng kho đầy đủ, cùng text, cùng checkpoint và tiền xử lý.
 
-Upload these files [here](https://circo.micc.unifi.it/evaluation) to view the results.
+## 8. Nguồn và giấy phép
 
-### GeneCIS
-Evaluating GeneCIS requires a few additional steps. Run the following script:
-
-You can get `VG_100K_all` and `COCO_val2017` at [GeneCIS](https://github.com/facebookresearch/genecis?tab=readme-ov-file#-arrow_down-downloads).
-
-```bash
-# Assuming you're in the lincir folder.
-$ git fetch --all
-$ git checkout eval_genecis
-$ cd genecis
-$ python evaluate.py \
---combiner_mode phi \
---model large \
---combiner_pretrain_path /path/to/lincir_best.pt \
---vg_100k_all_path /path/to/VG_100K_all \
---coco_val2017_path /path/to/val2017
-```
-
-## Acknowledgement
-We would like to express our special gratitude to the authors of [SEARLE](https://github.com/miccunifi/SEARLE) for their invaluable contributions, as our code draws significant inspiration from this open-source project.
-
-## Citation
-```
-@inproceedings{gu2024lincir,
-    title={Language-only Training of Zero-shot Composed Image Retrieval},
-    author={Gu, Geonmo and Chun, Sanghyuk and Kim, Wonjae and and Kang, Yoohoon and Yun, Sangdoo},
-    year={2024},
-    booktitle={Conference on Computer Vision and Pattern Recognition (CVPR)},
-}
-```
-
-## License
-
-Licensed under [CC BY-NC 4.0](LICENSE)
-
-```
-LinCIR
-Copyright (c) 2023-present NAVER Corp.
-CC BY-NC-4.0 (https://creativecommons.org/licenses/by-nc/4.0/)
-```
+Project này là bản chỉnh sửa phục vụ bài tập, dựa trên [LinCIR của NAVER](https://github.com/navervision/LinCIR) và [bài LinCIR](https://arxiv.org/abs/2312.01998). Giữ `LICENSE`, `NOTICE` và tài liệu upstream; mã gốc LinCIR theo CC BY-NC-4.0. FTI dùng asset từ [nguồn FTI4CIR](https://github.com/iLearn-Lab/SIGIR24-FTI4CIR), được tải riêng, không gán lại giấy phép của LinCIR cho asset FTI. CIRCO/COCO và ảnh có điều kiện sử dụng riêng, không đóng gói lại trong repo này. Chi tiết nguồn/commit tại model_manifest.json.

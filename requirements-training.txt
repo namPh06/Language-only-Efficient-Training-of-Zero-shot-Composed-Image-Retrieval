@@ -1,0 +1,8 @@
+# Optional original training, not covered by demo validation
+-r requirements.txt
+torchvision
+webdataset
+accelerate
+datasets
+spacy
+diffusers

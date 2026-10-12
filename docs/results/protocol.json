@@ -1,0 +1,27 @@
+{
+  "deadline_seconds": 1200,
+  "modes": [
+    "baseline",
+    "gated",
+    "fti_clip",
+    "fti_clip_gated"
+  ],
+  "screen_queries": 10,
+  "stop_if_speed_ratio_over_baseline": 3,
+  "candidate_quality_requires": [
+    "mAP@10 > gated",
+    "mAP@50 > gated"
+  ],
+  "candidate_latency_limit_ratio_baseline": 1.25,
+  "preprocessing": "Existing CLIP center-crop224 gallery; NOT official default targetpad. Fixed test variant.",
+  "labels": "Inference refimage+relativecaption only; gt metrics only",
+  "hashes": {
+    "demo.py": "dde5a7b92b3f0610e905e73cd32cafc9dcf8829d6f8bd382fe65540f3433ba32",
+    "benchmark_circo.py": "a29d9e81c614998864bcb3712d155bd32641ec3694b91c6c4a885d3f05b529eb",
+    "upgraded_retrieval.py": "fa11d11202203f1f4a3d158fb79ed89e9629bfc1e1e2cc973902348fd8ba54d3",
+    "retrieval_utils.py": "0ba35e13c2b69a20c89cf467c253f47b2e8199ed133fdd7d2657339f4b2ea170",
+    "models.py": "61204cc80d42b35e3e137587e3b30aa5f83d1c54c83a9181693038f1cfad7c32",
+    "encode_with_pseudo_tokens.py": "b3ccf5011fed76cff67b037bfe34dd81602bc351e670d6e613a9a1214c12a042",
+    "pretrained_models/lincir_large.pt": "5ba98d52db7a5e9a78f9ba7436991235477b89544caf246e4659642bf9b409bd"
+  }
+}

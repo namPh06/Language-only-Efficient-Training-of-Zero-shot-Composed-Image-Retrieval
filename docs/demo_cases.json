@@ -1,0 +1,62 @@
+[
+  {
+    "query_id": 103,
+    "reference_img_id": 67787,
+    "target_img_id": 464388,
+    "text": "has boats and the sky in the background",
+    "target_ranks": {
+      "baseline": 21,
+      "gated": 3,
+      "fti_clip": 1
+    },
+    "role": "improvement"
+  },
+  {
+    "query_id": 8,
+    "reference_img_id": 475326,
+    "target_img_id": 375657,
+    "text": "is sitting on a bench and the image is in greyscale",
+    "target_ranks": {
+      "baseline": 7,
+      "gated": 2,
+      "fti_clip": 1
+    },
+    "role": "improvement"
+  },
+  {
+    "query_id": 199,
+    "reference_img_id": 94215,
+    "target_img_id": 444686,
+    "text": "is seen from behind and has a big clock in the background",
+    "target_ranks": {
+      "baseline": 43,
+      "gated": 26,
+      "fti_clip": 1
+    },
+    "role": "improvement"
+  },
+  {
+    "query_id": 100,
+    "reference_img_id": 126421,
+    "target_img_id": 135001,
+    "text": "wear blue ties and the photo is shot indoor",
+    "target_ranks": {
+      "baseline": null,
+      "gated": null,
+      "fti_clip": 1
+    },
+    "role": "improvement"
+  },
+  {
+    "query_id": 114,
+    "reference_img_id": 6784,
+    "target_img_id": 556847,
+    "text": "is set outdoors and has grass in the background",
+    "target_ranks": {
+      "baseline": 1,
+      "gated": 1,
+      "fti_clip": 49
+    },
+    "role": "limitation"
+  }
+]

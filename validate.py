@@ -1,13 +1,12 @@
 import json
+import inspect
 import pickle
 from argparse import ArgumentParser
 from typing import List, Dict, Tuple
 
-import clip
 import numpy as np
 import torch
 import torch.nn.functional as F
-from clip.model import CLIP
 from transformers import CLIPTextModelWithProjection
 from torch.utils.data import DataLoader
 from torch.utils.data import Dataset
@@ -15,7 +14,7 @@ from tqdm import tqdm
 
 from data_utils import collate_fn, PROJECT_ROOT, targetpad_transform
 from loader import FashionIQDataset, CIRRDataset, CIRCODataset
-from encode_with_pseudo_tokens import encode_with_pseudo_tokens_HF
+from encode_with_pseudo_tokens import encode_with_pseudo_tokens_HF, tokenize_retrieval_text
 from models import build_text_encoder, Phi, PIC2WORD
 from utils import extract_image_features, device, extract_pseudo_tokens_with_phi
 
@@ -37,6 +36,9 @@ def fiq_generate_val_predictions(clip_model, relative_val_dataset: Dataset, ref_
     target_names_list = []
 
     # Compute features
+    reference_positions = {}
+    for position, reference_name in enumerate(ref_names_list):
+        reference_positions.setdefault(reference_name, position)
     for batch in tqdm(relative_val_loader):
         reference_names = batch['reference_name']
         target_names = batch['target_name']
@@ -52,13 +54,13 @@ def fiq_generate_val_predictions(clip_model, relative_val_dataset: Dataset, ref_
 
         input_captions = [
             f"a photo of $ that {in_cap}" for in_cap in input_captions]
-        batch_tokens = torch.vstack([pseudo_tokens[ref_names_list.index(ref)].unsqueeze(0) for ref in reference_names])
-        tokenized_input_captions = clip.tokenize(input_captions, context_length=77).to(device)
+        batch_tokens = torch.vstack([pseudo_tokens[reference_positions[ref]].unsqueeze(0) for ref in reference_names])
+        tokenized_input_captions = tokenize_retrieval_text(clip_model, input_captions, context_length=77).to(device)
         text_features = encode_with_pseudo_tokens_HF(clip_model, tokenized_input_captions, batch_tokens)
 
         input_captions_reversed = [
             f"a photo of $ that {in_cap}" for in_cap in input_captions_reversed]
-        tokenized_input_captions_reversed = clip.tokenize(input_captions_reversed, context_length=77).to(device)
+        tokenized_input_captions_reversed = tokenize_retrieval_text(clip_model, input_captions_reversed, context_length=77).to(device)
         text_features_reversed = encode_with_pseudo_tokens_HF(clip_model, tokenized_input_captions_reversed,
                                                            batch_tokens)
 
@@ -86,12 +88,13 @@ def fiq_compute_val_metrics(relative_val_dataset: Dataset, clip_model, index_fea
 
     # Move the features to the device
     index_features = index_features.to(device)
-    predicted_features = predicted_features.to(device)
+    predicted_features = predicted_features.float().to(device)
 
     # Normalize the features
     index_features = F.normalize(index_features.float())
 
     # Compute the distances
+    predicted_features = predicted_features.float().to(device)
     distances = 1 - predicted_features @ index_features.T
     sorted_indices = torch.argsort(distances, dim=-1).cpu()
     sorted_index_names = np.array(index_names)[sorted_indices]
@@ -146,6 +149,9 @@ def cirr_generate_val_predictions(clip_model: CLIPTextModelWithProjection, relat
     group_members_list = []
     reference_names_list = []
 
+    reference_positions = {}
+    for position, reference_name in enumerate(ref_names_list):
+        reference_positions.setdefault(reference_name, position)
     for batch in tqdm(relative_val_loader):
         reference_names = batch['reference_name']
         target_names = batch['target_name']
@@ -157,8 +163,8 @@ def cirr_generate_val_predictions(clip_model: CLIPTextModelWithProjection, relat
         input_captions = [
             f"a photo of $ that {rel_caption}" for rel_caption in relative_captions]
 
-        batch_tokens = torch.vstack([pseudo_tokens[ref_names_list.index(ref)].unsqueeze(0) for ref in reference_names])
-        tokenized_input_captions = clip.tokenize(input_captions, context_length=77).to(device)
+        batch_tokens = torch.vstack([pseudo_tokens[reference_positions[ref]].unsqueeze(0) for ref in reference_names])
+        tokenized_input_captions = tokenize_retrieval_text(clip_model, input_captions, context_length=77).to(device)
         text_features = encode_with_pseudo_tokens_HF(clip_model, tokenized_input_captions, batch_tokens)
 
         predicted_features = F.normalize(text_features)
@@ -189,6 +195,9 @@ def cirr_generate_val_predictions_with_phi(clip_model: CLIPTextModelWithProjecti
     group_members_list = []
     reference_names_list = []
 
+    reference_positions = {}
+    for position, reference_name in enumerate(ref_names_list):
+        reference_positions.setdefault(reference_name, position)
     for batch in tqdm(relative_val_loader):
         reference_names = batch['reference_name']
         target_names = batch['target_name']
@@ -201,11 +210,16 @@ def cirr_generate_val_predictions_with_phi(clip_model: CLIPTextModelWithProjecti
             f"a photo of $ that {rel_caption}" for rel_caption in relative_captions]
 
         # we need to make batch_tokens with selected_image_features
-        selected_image_features = torch.vstack([image_features[ref_names_list.index(ref)] for ref in reference_names])
-        tokenized_input_captions = clip.tokenize(input_captions, context_length=77).to(device)
+        selected_image_features = torch.vstack([image_features[reference_positions[ref]] for ref in reference_names])
+        tokenized_input_captions = tokenize_retrieval_text(clip_model, input_captions, context_length=77).to(device)
         context = clip_model.text_model.embeddings.token_embedding(tokenized_input_captions) + clip_model.text_model.embeddings.position_embedding(clip_model.text_model.embeddings.position_ids)
-        batch_tokens = phi(selected_image_features, context)
-        #batch_tokens = torch.vstack([pseudo_tokens[ref_names_list.index(ref)].unsqueeze(0) for ref in reference_names])
+        parameter = next(phi.parameters())
+        selected_image_features = selected_image_features.to(device=parameter.device, dtype=parameter.dtype)
+        if len(inspect.signature(phi.forward).parameters) > 1:
+            batch_tokens = phi(selected_image_features, context.to(device=parameter.device, dtype=parameter.dtype))
+        else:
+            batch_tokens = phi(selected_image_features)
+        #batch_tokens = torch.vstack([pseudo_tokens[reference_positions[ref]].unsqueeze(0) for ref in reference_names])
         text_features = encode_with_pseudo_tokens_HF(clip_model, tokenized_input_captions, batch_tokens)
 
         predicted_features = F.normalize(text_features)
@@ -233,13 +247,14 @@ def cirr_compute_val_metrics(relative_val_dataset: Dataset, clip_model, index_fe
         cirr_generate_val_predictions(clip_model, relative_val_dataset, ref_names_list, pseudo_tokens)
 
     index_features = index_features.to(device)
-    predicted_features = predicted_features.to(device)
+    predicted_features = predicted_features.float().to(device)
 
     # Normalize the index features
     index_features = F.normalize(index_features, dim=-1).float()
     predicted_features = predicted_features.float()
 
     # Compute the distances and sort the results
+    predicted_features = predicted_features.float().to(device)
     distances = 1 - predicted_features @ index_features.T
     sorted_indices = torch.argsort(distances, dim=-1).cpu()
     sorted_index_names = np.array(index_names)[sorted_indices]
@@ -294,13 +309,14 @@ def cirr_compute_val_metrics_with_phi(relative_val_dataset: Dataset, clip_model:
         cirr_generate_val_predictions_with_phi(clip_model, phi, relative_val_dataset, ref_names_list, image_features)
 
     index_features = index_features.to(device)
-    predicted_features = predicted_features.to(device)
+    predicted_features = predicted_features.float().to(device)
 
     # Normalize the index features
     index_features = F.normalize(index_features, dim=-1).float()
     predicted_features = predicted_features.float()
 
     # Compute the distances and sort the results
+    predicted_features = predicted_features.float().to(device)
     distances = 1 - predicted_features @ index_features.T
     sorted_indices = torch.argsort(distances, dim=-1).cpu()
     sorted_index_names = np.array(index_names)[sorted_indices]
@@ -381,6 +397,9 @@ def circo_generate_val_predictions(clip_model, relative_val_dataset: Dataset, re
     gts_img_ids_list = []
 
     # Compute the features
+    reference_positions = {}
+    for position, reference_name in enumerate(ref_names_list):
+        reference_positions.setdefault(reference_name, position)
     for batch in tqdm(relative_val_loader):
         reference_names = batch['reference_name']
         target_names = batch['target_name']
@@ -389,8 +408,8 @@ def circo_generate_val_predictions(clip_model, relative_val_dataset: Dataset, re
 
         gt_img_ids = np.array(gt_img_ids).T.tolist()
         input_captions = [f"a photo of $ that {caption}" for caption in relative_captions]
-        batch_tokens = torch.vstack([pseudo_tokens[ref_names_list.index(ref)].unsqueeze(0) for ref in reference_names])
-        tokenized_input_captions = clip.tokenize(input_captions, context_length=77).to(device)
+        batch_tokens = torch.vstack([pseudo_tokens[reference_positions[ref]].unsqueeze(0) for ref in reference_names])
+        tokenized_input_captions = tokenize_retrieval_text(clip_model, input_captions, context_length=77).to(device)
         text_features = encode_with_pseudo_tokens_HF(clip_model, tokenized_input_captions, batch_tokens)
         predicted_features = F.normalize(text_features)
 
@@ -426,7 +445,7 @@ def circo_compute_val_metrics(relative_val_dataset: Dataset, clip_model, index_f
 
     # Move the features to the device
     index_features = index_features.to(device)
-    predicted_features = predicted_features.to(device)
+    predicted_features = predicted_features.float().to(device)
 
     # Normalize the features
     index_features = F.normalize(index_features.float())
@@ -435,7 +454,7 @@ def circo_compute_val_metrics(relative_val_dataset: Dataset, clip_model, index_f
         gt_img_ids = np.array(gt_img_ids)[
             np.array(gt_img_ids) != '']  # remove trailing empty strings added for collate_fn
         similarity = predicted_feature @ index_features.T
-        sorted_indices = torch.topk(similarity, dim=-1, k=50).indices.cpu()
+        sorted_indices = torch.topk(similarity, dim=-1, k=min(50, len(index_names))).indices.cpu()
         sorted_index_names = np.array(index_names)[sorted_indices]
         map_labels = torch.tensor(np.isin(sorted_index_names, gt_img_ids), dtype=torch.uint8)
         precisions = torch.cumsum(map_labels, dim=0) * map_labels  # Consider only positions corresponding to GTs
@@ -521,10 +540,12 @@ def main():
 
     #if args.eval_type in ['phi', 'oti'] and args.exp_name is None:
     #    raise ValueError("Experiment name is required when using phi or oti evaluation type")
-    if args.eval_type == 'phi' and args.phi_checkpoint_name is None:
+    if args.eval_type in ('phi', 'pic2word') and args.phi_checkpoint_name is None:
         raise ValueError("Phi checkpoint name is required when using phi evaluation type")
 
     if args.eval_type == 'oti':
+        if not args.exp_name:
+            parser.error('--exp-name is required for oti')
         experiment_path = PROJECT_ROOT / 'data' / "oti_pseudo_tokens" / args.dataset.lower() / 'val' / args.exp_name
         if not experiment_path.exists():
             raise ValueError(f"Experiment {args.exp_name} not found")
@@ -537,11 +558,15 @@ def main():
             ref_names_list = pickle.load(f)
 
         clip_model_name = hyperparameters['clip_model_name']
-        clip_model, clip_preprocess = clip.load(clip_model_name, device='cpu', jit=False)
+        args.clip_model_name = {'ViT-B/32': 'base', 'ViT-L/14': 'large'}.get(clip_model_name, clip_model_name)
+        args.mixed_precision = 'no'
+        image_encoder, clip_preprocess, text_encoder, tokenizer = build_text_encoder(args)
+        image_encoder = image_encoder.float().to(device).eval()
+        text_encoder = text_encoder.float().to(device).eval()
 
         if args.preprocess_type == 'targetpad':
             print('Target pad preprocess pipeline is used')
-            preprocess = targetpad_transform(1.25, clip_model.visual.input_resolution)
+            preprocess = targetpad_transform(1.25, image_encoder.config.image_size)
         elif args.preprocess_type == 'clip':
             print('CLIP preprocess pipeline is used')
             preprocess = clip_preprocess
@@ -551,7 +576,7 @@ def main():
 
     elif args.eval_type in ['phi', 'searle', 'searle-xl', 'pic2word']:
         if args.eval_type == 'phi':
-            args.mixed_precision = 'fp16'
+            args.mixed_precision = 'fp16' if device.type == 'cuda' else 'no'
             image_encoder, clip_preprocess, text_encoder, tokenizer = build_text_encoder(args)
 
             phi = Phi(input_dim=text_encoder.config.projection_dim,
@@ -566,7 +591,7 @@ def main():
             phi = phi.eval()
 
         elif args.eval_type == 'pic2word':
-            args.mixed_precision = 'fp16'
+            args.mixed_precision = 'fp16' if device.type == 'cuda' else 'no'
             image_encoder, clip_preprocess, text_encoder, tokenizer = build_text_encoder(args)
             phi = PIC2WORD(embed_dim=text_encoder.config.projection_dim,
                            output_dim=text_encoder.config.hidden_size,
@@ -584,11 +609,13 @@ def main():
             phi, _ = torch.hub.load(repo_or_dir='miccunifi/SEARLE', model='searle', source='github',
                                     backbone=clip_model_name)
             phi = phi.to(device).eval()
-            clip_model, clip_preprocess = clip.load(clip_model_name, device=device, jit=False)
+            args.clip_model_name = 'base' if clip_model_name == 'ViT-B/32' else 'large'
+            args.mixed_precision = 'no'
+            image_encoder, clip_preprocess, text_encoder, tokenizer = build_text_encoder(args)
 
         if args.preprocess_type == 'targetpad':
             print('Target pad preprocess pipeline is used')
-            preprocess = targetpad_transform(1.25, clip_model.visual.input_resolution)
+            preprocess = targetpad_transform(1.25, image_encoder.config.image_size)
         elif args.preprocess_type == 'clip':
             print('CLIP preprocess pipeline is used')
             preprocess = clip_preprocess
@@ -607,8 +634,8 @@ def main():
             raise ValueError("Dataset not supported")
 
         #clip_model = clip_model.float().to(device)
-        image_encoder = image_encoder.float().to(device)
-        text_encoder = text_encoder.float().to(device)
+        image_encoder = image_encoder.float().to(device).eval()
+        text_encoder = text_encoder.float().to(device).eval()
         pseudo_tokens, ref_names_list = extract_pseudo_tokens_with_phi(image_encoder, phi, relative_val_dataset, args)
         pseudo_tokens = pseudo_tokens.to(device)
     else:
@@ -639,7 +666,7 @@ def main():
             print(f"{k} = {v:.2f}")
 
     elif args.dataset.lower() == 'circo':
-        circo_metrics = circo_val_retrieval(args.dataset_path, clip_model_name, ref_names_list, pseudo_tokens,
+        circo_metrics = circo_val_retrieval(args.dataset_path, image_encoder, text_encoder, ref_names_list, pseudo_tokens,
                                             preprocess)
 
         for k, v in circo_metrics.items():
