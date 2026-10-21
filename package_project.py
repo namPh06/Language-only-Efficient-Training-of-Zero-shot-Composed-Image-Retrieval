@@ -2,12 +2,13 @@
 from pathlib import Path
 import hashlib,json,zipfile
 ROOT=Path(__file__).resolve().parent
+ONLINE_FILES=['laion_online.py','prepare_laion.py','requirements-online.txt','RUN_LAION.cmd','check_laion.py','check_main_ui.py']
 FILES=['.gitignore','README.md','LICENSE','NOTICE','requirements.txt','requirements-demo.txt','requirements-benchmark.txt','requirements-training.txt','runtime_config.py','setup_models.py','model_manifest.json','package_project.py','demo.py','demo_fti.py','demo_circo_showcase.py','fti_retrieval.py','upgraded_retrieval.py','retrieval_utils.py','encode_with_pseudo_tokens.py','models.py','clip_client.py','run_pretrained.py','prepare_circo.py','benchmark_circo.py','data_utils.py','loader.py','utils.py','train_phi.py','validate.py','eval_templates.py','generate_test_submission.py','example1.jpg','5. 2312.01998v2.pdf','RUN_PRETRAINED.cmd','RUN_CIRCO.cmd','CHECK_CIRCO.cmd','RUN_DEMO.cmd','gallery/.gitkeep','.github/figure_001.png']
 
 def main():
- files=[ROOT/n for n in FILES]+sorted((ROOT/'docs').rglob('*'))
+ files=[ROOT/n for n in FILES+ONLINE_FILES]+sorted((ROOT/'docs').rglob('*'))
  files=[p for p in files if p.is_file()]
- missing=[n for n in FILES if not (ROOT/n).is_file()]
+ missing=[n for n in FILES+ONLINE_FILES if not (ROOT/n).is_file()]
  if missing:raise SystemExit('Missing required source files: '+str(missing))
  out=ROOT/'dist';out.mkdir(exist_ok=True);target=out/'cir_project_github.zip'
  inventory={p.relative_to(ROOT).as_posix():hashlib.sha256(p.read_bytes()).hexdigest() for p in files}

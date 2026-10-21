@@ -34,7 +34,7 @@ $env:CIR_MODEL_CACHE = "D:\cir_model_cache"
 .\.venv\Scripts\python.exe demo_fti.py
 ```
 
-Mở **http://127.0.0.1:8013/**. Thêm ảnh ứng viên vào `gallery/` hoặc qua giao diện. Chọn ảnh tham chiếu, nhập text như `wearing a blue shirt`, chọn số kết quả, rồi nhấn **So sánh cả ba phiên bản**. Có thể chọn ảnh đối chiếu để xem thứ hạng của ảnh đó.
+Mở **http://127.0.0.1:8013/** (Windows: chạy `RUN_DEMO.cmd`). Chọn **Nguồn ảnh: Kho ảnh local / LAION online** ngay trong giao diện; dùng chung ảnh tham chiếu và mô tả khi chuyển nguồn. Cả hai nguồn đều có nút **So sánh cả ba phiên bản** và ba cột LinCIR gốc, gated, FTI4CIR. Các phương pháp giữ nguyên cách tạo truy vấn và xếp hạng; lựa chọn nguồn chỉ đổi kho vector và cách hiển thị ảnh. Với Local, thêm ảnh ứng viên vào `gallery/` hoặc qua giao diện; có thể chọn ảnh đối chiếu để xem thứ hạng. Với LAION, cả ba cùng tìm trên tập vector đã chuẩn bị, ảnh được trình duyệt tải trực tiếp từ URL gốc. Đổi nguồn sẽ xóa kết quả cũ.
 
 - Cần có ảnh phù hợp trong kho. Không có ảnh đáp ứng thì hệ thống vẫn trả ảnh gần nhất.
 - Lần đầu mã hóa ảnh thành vector và lưu tại `outputs/index/`; thêm/sửa ảnh sẽ cập nhật phần cần thiết.
@@ -42,6 +42,28 @@ Mở **http://127.0.0.1:8013/**. Thêm ảnh ứng viên vào `gallery/` hoặc 
 - Điểm tương đồng không phải xác suất chính xác. Mô hình có thể bỏ sót màu sắc, hoa văn nhỏ hoặc yêu cầu phức tạp.
 
 Demo hai bản gốc/gated: `python demo.py` tại http://127.0.0.1:8000/. Nếu đã kích hoạt môi trường, có thể dùng `python` thay đường dẫn đầy đủ. Windows có `RUN_DEMO.cmd` chạy demo ba bản.
+
+### Tìm ảnh LAION online
+
+Chế độ này dùng chung embedding OpenAI CLIP ViT-L/14 từ [mẫu LAION do ClickHouse cung cấp](https://clickhouse.com/docs/get-started/sample-datasets/laion5b) cho **LinCIR gốc, gated và FTI4CIR**. Chỉ mục vector và URL lưu trên máy; trình duyệt lấy ảnh kết quả trực tiếp từ website gốc. Không tải kho ảnh về `gallery/`.
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-online.txt
+.\.venv\Scripts\python.exe -B -X utf8 prepare_laion.py
+.\.venv\Scripts\python.exe -B -X utf8 demo_fti.py --source laion
+```
+
+Mở **http://127.0.0.1:8013/**, chọn **LAION online**, ảnh tham chiếu, nhập mô tả tiếng Anh và nhấn **So sánh cả ba phiên bản**. `RUN_DEMO.cmd` dùng chung cho cả hai nguồn. `RUN_LAION.cmd` là lối tắt: chuẩn bị chỉ mục lần đầu, dùng lại ở lần sau và mở cùng giao diện chính với LAION được chọn sẵn. Chỉ chạy một launcher tại một thời điểm; cả hai dùng cổng 8013 mặc định. Chưa có chỉ mục LAION vẫn có thể dùng Local; việc đọc chỉ mục LAION chỉ diễn ra khi tìm trên nguồn đó.
+
+- Mặc định quét 50.000 dòng ở row group đầu, giữ các vector hợp lệ có nhãn `NSFW=UNLIKELY`. Giao diện báo đúng số ứng viên còn lại. Đây là **tập con**, không tìm toàn bộ LAION-5B; các chủ đề ngoài mẫu có thể không có ảnh phù hợp.
+- Lần đầu tải metadata/vector qua HTTP Range, khoảng 80 MiB với mẫu mặc định (cấu trúc nguồn có thể thay đổi); giới hạn mặc định 512 MiB. Không tải nguyên file Parquet 15,9 GB. Lần sau dùng lại `outputs/laion_index/`, không tải lại vector.
+- Đổi mẫu bằng `python prepare_laion.py --rows 100000 --row-group 1 --output outputs/laion_index_100k`, rồi chạy demo với `--laion-index outputs/laion_index_100k`. Chỉ mục mới cần thư mục mới; không thay index khi demo đang dùng.
+- Ảnh hiển thị từ URL ngoài, có thể bị xóa/chặn hoặc có chất lượng thấp. Nhãn NSFW của dataset không bảo đảm nội dung phù hợp. Ứng dụng không tự xác nhận ảnh đáp ứng mô tả.
+- Kiểm tra chỉ mục: `python prepare_laion.py --check`. Kiểm tra logic không dùng mạng: `python check_laion.py`; kiểm tra chuyển nguồn và định tuyến giao diện chính: `python check_main_ui.py`.
+
+So sánh ba phương pháp cần chỉ mục vector trên máy, vì gated kết hợp thêm điểm từ ảnh tham chiếu. Có thể đo cả chế độ ảnh mới và ảnh dùng lại; thời gian không gồm tải ảnh kết quả trên trình duyệt. LAION không có nhãn ảnh đích cho truy vấn này nên không tính hạng ảnh đối chiếu hay độ chính xác tự động.
+
+Khi có server, demo LinCIR riêng (`demo.py --source laion`) có thể gửi vector sang API tương thích `clip-retrieval` bằng `--laion-api-url https://your-server/knn-service`. Server phải phục vụ index `laion5B-L-14` với embedding **OpenAI CLIP ViT-L/14**; chỉ có cùng số chiều là chưa đủ. API công khai cũ không được dùng mặc định vì đang không kết nối được. Chế độ này chỉ gửi vector truy vấn, không gửi file ảnh tham chiếu. Mã chuẩn bị chỉ mục cũng có thể chạy trên server; việc triển khai server nằm ngoài bản thử nghiệm trên máy.
 
 ## 3. Demo các ví dụ CIRCO đã chọn
 

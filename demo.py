@@ -21,7 +21,6 @@ import pickle
 from io import BytesIO
 from collections import OrderedDict
 from functools import wraps
-from urllib.parse import urlparse
 import requests
 os.environ.setdefault('GRADIO_ANALYTICS_ENABLED', 'False')
 import gradio as gr
@@ -37,6 +36,7 @@ from models import Phi
 from encode_with_pseudo_tokens import encode_with_pseudo_tokens_HF
 from retrieval_utils import ReferenceCacheIdentity, exact_topk
 from upgraded_retrieval import MODE as UPGRADED_MODE, bounded_gate, is_negative, adaptive_prompt
+from laion_online import DEFAULT_INDEX, LaionIndex, image_url
 EXTENSIONS = {'.jpg','.jpeg','.png','.webp','.bmp','.tif','.tiff'}
 
 
@@ -68,13 +68,19 @@ def serialized_search(method):
 
 class LocalRetriever:
     def __init__(self, gallery, cache=DEFAULT_MODEL_CACHE, device='cpu', source='local',
-                 result_limit=20, exclude_reference_by_id=False, write_search_artifacts=True):
+                 result_limit=20, exclude_reference_by_id=False, write_search_artifacts=True,
+                 laion_index=DEFAULT_INDEX, laion_api_url=None):
         if result_limit not in (20, 50):
             raise ValueError('result_limit must be 20 (demo) or 50 (benchmark)')
         self.result_limit = result_limit
         self.exclude_reference_by_id = exclude_reference_by_id
         self.write_search_artifacts = write_search_artifacts
         self.source = source
+        self.laion_api_url = laion_api_url
+        self.laion_index_folder = Path(laion_index)
+        self.laion_index = LaionIndex(laion_index) if source == 'laion' and not laion_api_url else None
+        if laion_api_url and not image_url(laion_api_url):
+            raise ValueError('LAION API phải là URL HTTP hoặc HTTPS hợp lệ.')
         self.gallery = Path(gallery).resolve()
         self.gallery.mkdir(parents=True, exist_ok=True)
         self.lock = threading.RLock()
@@ -325,15 +331,50 @@ class LocalRetriever:
         return self.reference_cache[digest]
 
 
-    def search_upgraded(self, reference, description, top_k):
-        if self.source != 'local':
-            raise gr.Error('Chế độ kết hợp điểm hỗ trợ kho local.')
-        return self.search(reference, description, top_k, upgraded=True)
+    def search_upgraded(self, reference, description, top_k, source=None):
+        return self.search(reference, description, top_k, upgraded=True, source=source)
+
+
+    def _gallery_features(self, source):
+        if source == 'local':
+            self._index()
+            return self.features
+        if source != 'laion':
+            raise gr.Error('Nguồn ảnh không hợp lệ.')
+        if self.laion_api_url:
+            raise gr.Error('So sánh ba phương pháp cần chỉ mục vector LAION trên máy; bỏ --laion-api-url.')
+        if self.laion_index is None:
+            try:
+                self.laion_index = LaionIndex(self.laion_index_folder)
+            except (OSError, ValueError) as error:
+                raise gr.Error(f'Chưa đọc được kho LAION. Chạy python prepare_laion.py để chuẩn bị. {error}') from error
+        if not hasattr(self, 'laion_features'):
+            # Copy the read-only mmap once; keep local gallery state separate.
+            self.laion_features = torch.tensor(self.laion_index.vectors, device=self.device)
+        return self.laion_features
+
+
+    def _search_candidates(self, source, reference, digest):
+        return (self._candidate_indices(reference, digest) if source == 'local'
+                else list(range(len(self.laion_index.records))))
+
+
+    def _search_results(self, source, scores, order):
+        if source == 'laion':
+            return [(self.laion_index.records[i]['url'],
+                     f"{self.laion_index.records[i].get('caption') or ''} | điểm: {float(scores[i]):.4f}") for i in order]
+        return [(str(self.paths[i]), f'{self.paths[i].relative_to(self.gallery).as_posix()} | điểm: {float(scores[i]):.4f}')
+                for i in order]
 
 
     def search_laion(self, reference, tokens, top_k):
         from clip_client import ClipClient
         with self.lock, torch.inference_mode():
+            if self.laion_index is None and not self.laion_api_url:
+                try:
+                    self.laion_index = LaionIndex(self.laion_index_folder)
+                except (OSError, ValueError) as error:
+                    raise gr.Error(f'Chưa đọc được kho LAION. Chạy python prepare_laion.py để chuẩn bị. {error}') from error
             try:
                 image = read_image(reference)
             except (OSError, ValueError) as error:
@@ -343,29 +384,35 @@ class LocalRetriever:
             if not torch.isfinite(query).all():
                 raise gr.Error('Model trả về vector truy vấn không hợp lệ.')
             embedding = query[0].cpu().tolist()
-        client = ClipClient(url='https://knn.laion.ai/knn-service',
-                            indice_name='laion5B-L-14', num_images=int(top_k), timeout=20)
         try:
-            results = client.query(embedding_input=embedding)
+            if self.laion_index is not None:
+                results = self.laion_index.query(embedding, num_images=int(top_k))
+            else:
+                client = ClipClient(url=self.laion_api_url, indice_name='laion5B-L-14',
+                                    num_images=int(top_k), timeout=20)
+                results = client.query(embedding_input=embedding)
         except requests.RequestException as error:
             raise gr.Error('Không kết nối được LAION. Dịch vụ hoặc đường mạng hiện không sẵn sàng. '
-                           'Thử lại sau hoặc chạy python demo.py để dùng kho local.') from error
+                           'Kiểm tra --laion-api-url hoặc dùng chỉ mục tạo bởi prepare_laion.py.') from error
         except ValueError as error:
             raise gr.Error('LAION trả về dữ liệu không hợp lệ.') from error
         if not isinstance(results, list):
             raise gr.Error('LAION không trả về danh sách ảnh; có thể API đã thay đổi.')
         urls = [row.get('url') for row in results if isinstance(row, dict)]
-        urls = [url for url in urls if isinstance(url, str) and urlparse(url).scheme in ('http', 'https') and urlparse(url).netloc
-                and not any(c in url for c in '<>\r\n')]
+        urls = [url for url in urls if image_url(url)]
         # Browser loads remote images directly; do not populate the local gallery.
-        output = '\n\n'.join(f'![Ảnh {i + 1}](<{url}>)' for i, url in enumerate(urls[:int(top_k)]))
-        if not output:
-            output = 'LAION không trả về ảnh phù hợp.'
-        return output, f'LAION trả về {min(len(urls), int(top_k))} liên kết ảnh. Một số liên kết có thể không còn truy cập được.'
+        output = [(url, f'Ảnh {i + 1}') for i, url in enumerate(urls[:int(top_k)])]
+        scope = (f'Tìm trong {len(self.laion_index.records):,} ảnh của tập con LAION. '
+                 if self.laion_index is not None else 'Tìm qua LAION API đã cấu hình. ')
+        return output, (scope + f'Trả về {min(len(urls), int(top_k))} URL ảnh online. '
+                        'Ảnh do trình duyệt tải trực tiếp; một số URL có thể đã hỏng hoặc bị chặn.')
 
 
     @serialized_search
-    def search(self, reference, description, top_k, upgraded=False):
+    def search(self, reference, description, top_k, upgraded=False, source=None):
+        source = self.source if source is None else source
+        if source not in ('local', 'laion'):
+            raise gr.Error('Nguồn ảnh không hợp lệ.')
         if not isinstance(reference,(str,Path)) or not str(reference).strip():
             raise gr.Error('Hãy chọn ảnh tham chiếu.')
         if not isinstance(description,str) or not description.strip():
@@ -379,8 +426,6 @@ class LocalRetriever:
             raise gr.Error(f'Số kết quả phải là số nguyên 1–{self.result_limit}.')
         prompt=description.strip()
         if upgraded:
-            if self.source!='local':
-                raise gr.Error('Bản nâng cấp hỗ trợ kho local.')
             prompt,_=adaptive_prompt(prompt)
         elif '$' not in prompt:
             prompt='a photo of $ that '+prompt
@@ -392,15 +437,15 @@ class LocalRetriever:
         tokens=self.tokenizer(prompt,padding='max_length',truncation=True,max_length=77,return_tensors='pt').input_ids.to(self.device)
         if tokens.eq(259).sum().item()!=1:
             raise gr.Error('Mô tả không có đúng một pseudo-token LinCIR.')
-        if self.source=='laion':
+        if source=='laion' and self.laion_api_url and not upgraded:
             return self.search_laion(reference,tokens,top_k)
         with self.lock,torch.inference_mode():
             try:
                 image=read_image(reference)
             except (OSError,ValueError) as error:
                 raise gr.Error('Không đọc được ảnh tham chiếu.') from error
-            self._index()
-            if not self.paths:
+            features=self._gallery_features(source)
+            if not len(features):
                 raise gr.Error('Kho chưa có ảnh đọc được. Hãy thêm ảnh vào kho.')
             digest=image_digest(image)
             raw=self._fast_reference_features(image,digest) if upgraded else self._reference_features(image,digest)
@@ -408,28 +453,29 @@ class LocalRetriever:
             negative=upgraded and is_negative(description)
             if negative:
                 query=query+.1*F.normalize(raw.float(),dim=-1)
-            scores=(self.features@query.T).squeeze(1)
+            scores=(features@query.T).squeeze(1)
             if not torch.isfinite(scores).all():
                 raise gr.Error('Model trả về điểm không hợp lệ.')
-            candidates=self._candidate_indices(reference,digest)
+            candidates=self._search_candidates(source,reference,digest)
             if not candidates:
                 raise gr.Error('Kho chỉ có ảnh giống ảnh tham chiếu. Hãy thêm ảnh khác.')
             if upgraded and not negative:
-                stamp=(id(self.features),tuple(self.features.shape))
+                stamp=(id(features),tuple(features.shape))
                 if getattr(self,'_gate_norm_stamp',None)!=stamp:
-                    self._gate_max_norm=float(self.features.norm(dim=-1).max())
+                    self._gate_max_norm=float(features.norm(dim=-1).max())
                     self._gate_norm_stamp=stamp
-                order=bounded_gate(self.features,scores,raw,candidates,max(top_k,50),self._gate_max_norm)[:top_k]
+                order=bounded_gate(features,scores,raw,candidates,max(top_k,50),self._gate_max_norm)[:top_k]
             elif upgraded:
                 order=exact_topk(scores,candidates,top_k)
             else:
                 order=[candidates[j] for j in torch.argsort(scores[candidates],descending=True,stable=True).tolist()[:top_k]]
-            results=[(str(self.paths[i]),f'{self.paths[i].relative_to(self.gallery).as_posix()} | điểm: {float(scores[i]):.4f}') for i in order]
+            results=self._search_results(source,scores,order)
             label='Bản nâng cấp' if upgraded else 'LinCIR gốc'
-            status=f'{label}: đã tìm trong {len(candidates)} ảnh ứng viên ({self.device}). Điểm là độ tương đồng, không phải xác suất.'
+            scope=' của tập con LAION' if source=='laion' else ''
+            status=f'{label}: đã tìm trong {len(candidates):,} ảnh ứng viên{scope} ({self.device}). Điểm là độ tương đồng, không phải xác suất.'
             if upgraded:
                 status+=' Dùng truy vấn thích ứng và kết hợp điểm có giới hạn; không kiểm chứng từng ảnh. Kết quả có thể sai và không bảo đảm mọi thuộc tính.'
-            if self.skipped:
+            if source=='local' and self.skipped:
                 status+=f' Bỏ qua {len(self.skipped)} file ảnh không đọc được.'
             return results,status
 
@@ -438,13 +484,20 @@ def build_demo(retriever):
     def run_search(reference,description,top_k,mode):
         if mode not in ('Bản gốc LinCIR',UPGRADED_MODE):
             raise gr.Error('Chế độ tìm kiếm không hợp lệ.')
-        if mode==UPGRADED_MODE:
-            return retriever.search_upgraded(reference,description,top_k)
-        return retriever.search(reference,description,top_k)
+        results,status=retriever.search(reference,description,top_k,upgraded=mode==UPGRADED_MODE)
+        if retriever.source=='laion':
+            results='\n\n'.join(f'![Ảnh {i + 1}](<{url}>)' for i,(url,_) in enumerate(results))
+        return results,status
     with gr.Blocks(title='LinCIR — Tìm ảnh theo ảnh và mô tả') as app:
         gr.Markdown('# LinCIR: tìm ảnh theo ảnh tham chiếu và mô tả\nTìm ảnh có sẵn trong kho, không tạo hay chỉnh sửa ảnh.')
         if retriever.source=='laion':
-            gr.Markdown('Nguồn LAION online dùng bản gốc. Vector truy vấn được gửi tới dịch vụ; dịch vụ có thể không sẵn sàng.')
+            if retriever.laion_index is not None:
+                gr.Markdown(f'**Nguồn LAION online — tập con {len(retriever.laion_index.records):,} ảnh.** '
+                            'Tìm kiếm bằng LinCIR gốc. Máy lưu vector và URL; ảnh kết quả được lấy trực tiếp '
+                            'từ website gốc khi hiển thị. Một số ảnh có thể không tải được.')
+            else:
+                gr.Markdown('**Nguồn LAION online qua API.** Vector truy vấn được gửi tới server đã cấu hình; '
+                            'ảnh kết quả hiển thị từ URL online.')
         with gr.Accordion('1. Kho ảnh — thêm ảnh ứng viên trước khi tìm',open=True,visible=retriever.source=='local'):
             gr.Markdown(f'Kho ảnh: `{retriever.gallery}`')
             uploads=gr.File(label='Chọn ảnh thêm vào kho',file_count='multiple',type='filepath',file_types=['image'])
@@ -460,7 +513,7 @@ def build_demo(retriever):
                 search=gr.Button('Tìm ảnh',variant='primary')
         status=gr.Textbox(label='Trạng thái tìm kiếm',interactive=False,lines=3)
         results=gr.Gallery(label='Kết quả tìm kiếm',columns=3,type='filepath') if retriever.source=='local' else gr.Markdown()
-        mode.change(lambda:([], 'Đã đổi phiên bản. Nhấn Tìm ảnh để chạy lại.'),outputs=[results,status],api_name=False)
+        mode.change(lambda:([] if retriever.source=='local' else '', 'Đã đổi phiên bản. Nhấn Tìm ảnh để chạy lại.'),outputs=[results,status],api_name=False)
         search.click(run_search,inputs=[reference,description,top_k,mode],outputs=[results,status],api_name='search')
     return app
 
@@ -473,13 +526,16 @@ def main():
     parser.add_argument('--port', type=int, default=8000)
     parser.add_argument('--no-browser', action='store_true')
     parser.add_argument('--source', choices=['local', 'laion'], default='local')
+    parser.add_argument('--laion-index', type=Path, default=DEFAULT_INDEX)
+    parser.add_argument('--laion-api-url', help='API clip-retrieval dùng index laion5B-L-14; bỏ trống để dùng tập con đã chuẩn bị.')
     args = parser.parse_args()
     if not 1 <= args.port <= 65535:
         parser.error("Cổng phải nằm trong khoảng 1–65535.")
     try:
-        retriever = LocalRetriever(args.gallery, args.cache_dir, args.device, args.source)
+        retriever = LocalRetriever(args.gallery, args.cache_dir, args.device, args.source,
+                                   laion_index=args.laion_index, laion_api_url=args.laion_api_url)
     except (OSError, ValueError, RuntimeError) as error:
-        print(f'Không khởi động được: {error}\nXem HUONG_DAN_DEMO.md để kiểm tra môi trường và model.', file=sys.stderr)
+        print(f'Không khởi động được: {error}\nXem README.md để kiểm tra môi trường, model và nguồn ảnh.', file=sys.stderr)
         return 1
     print(f'Sẵn sàng. Mở http://127.0.0.1:{args.port} | Kho ảnh: {retriever.gallery}', flush=True)
     build_demo(retriever).queue().launch(server_name='127.0.0.1', server_port=args.port,

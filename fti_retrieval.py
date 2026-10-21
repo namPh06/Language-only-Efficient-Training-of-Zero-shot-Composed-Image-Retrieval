@@ -63,7 +63,6 @@ def query(r,sub,attr,counts,text):
 
 class FTIRetriever:
     def __init__(self,retriever):
-        if retriever.source!='local': raise ValueError('FTI4CIR requires a local gallery.')
         self.retriever=retriever
         self.model=load_fti().to(retriever.device)
         self.cache=OrderedDict()
@@ -75,23 +74,25 @@ class FTIRetriever:
         self.cache.move_to_end(digest)
         return self.cache[digest]
 
-    def search(self,reference,description,top_k=6):
+    def search(self,reference,description,top_k=6,source=None):
         if reference is None: raise ValueError('Hãy chọn ảnh tham chiếu.')
         if not isinstance(description,str) or not description.strip(): raise ValueError('Hãy nhập mô tả thay đổi bằng tiếng Anh.')
         if isinstance(top_k,bool) or not 1<=float(top_k)<=self.retriever.result_limit or not float(top_k).is_integer(): raise ValueError('Số kết quả không hợp lệ.')
         r=self.retriever
+        source=r.source if source is None else source
         with r.lock,torch.inference_mode():
             image=read_image(reference);digest=image_digest(image)
-            r._index()
-            if not r.paths: raise ValueError('Kho chưa có ảnh đọc được.')
+            features=r._gallery_features(source)
+            if not len(features): raise ValueError('Kho chưa có ảnh đọc được.')
             raw,sub,attr,counts=self.reference_tokens(image,digest)
             prompt=f"a photo of * with {'* '*counts[0]}but "+description.strip()
             if len(r.tokenizer(prompt,truncation=False).input_ids)>77: raise ValueError('Mô tả vượt giới hạn token CLIP. Hãy viết ngắn hơn.')
             q=query(r,sub,attr,counts,description.strip())
-            scores=(r.features@q.T).squeeze(1)
+            scores=(features@q.T).squeeze(1)
             if not torch.isfinite(scores).all(): raise ValueError('Điểm tìm kiếm không hợp lệ.')
-            candidates=r._candidate_indices(reference,digest)
+            candidates=r._search_candidates(source,reference,digest)
             if not candidates: raise ValueError('Kho không có ảnh khác ảnh tham chiếu.')
             order=exact_topk(scores,candidates,int(top_k))
-            results=[(str(r.paths[i]),f'{r.paths[i].name} | điểm: {float(scores[i]):.4f}') for i in order]
-            return results,f'FTI4CIR thử nghiệm: tìm trong {len(candidates)} ảnh. Có lưu token của 16 ảnh tham chiếu gần nhất trong RAM. Điểm là độ tương đồng, không bảo đảm mọi thuộc tính.'
+            results=r._search_results(source,scores,order)
+            scope=' của tập con LAION' if source=='laion' else ''
+            return results,f'FTI4CIR thử nghiệm: tìm trong {len(candidates):,} ảnh{scope}. Có lưu token của 16 ảnh tham chiếu gần nhất trong RAM. Điểm là độ tương đồng, không bảo đảm mọi thuộc tính.'
