@@ -12,67 +12,73 @@ cd <TEN_THU_MUC_REPO>
 py -3.14 -m venv .venv
 .\.venv\Scripts\python.exe -m pip install --upgrade pip
 .\.venv\Scripts\python.exe -m pip install torch==2.14.0 --index-url https://download.pytorch.org/whl/cpu
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe setup_models.py
-.\.venv\Scripts\python.exe setup_models.py --check
+.\.venv\Scripts\python.exe -m pip install -r requirements/requirements.txt
+.\.venv\Scripts\python.exe -m lincir.data.setup_models
+.\.venv\Scripts\python.exe -m lincir.data.setup_models --check
 ```
 
-Môi trường đã kiểm chứng trên máy phát triển: Windows, Python 3.14, CPU; phiên bản thư viện được cố định trong requirements.txt. Không cần GPU hoặc train lại. Các nền tảng khác chưa được kiểm chứng đầy đủ. Trên Linux/macOS, tạo môi trường bằng `python3 -m venv .venv` và dùng `.venv/bin/python` thay cho đường dẫn Windows; chọn gói PyTorch phù hợp hệ điều hành.
+Mọi lệnh Python dùng dạng `python -m lincir.<nhóm>.<module>` và phải chạy từ thư mục gốc của project (chứa README).
 
-`setup_models.py` tải CLIP ViT-L/14, **chỉ tokenizer_2** của SDXL (không tải mô hình sinh ảnh SDXL), checkpoint LinCIR, checkpoint FTI và hai file nguồn FTI cần thiết. Các asset cố định theo revision/commit; checkpoint và nguồn FTI kiểm tra SHA256 trong model_manifest.json. Lần đầu cần Internet và vài GB dung lượng model/cache. Lần sau dùng model local.
+Sau khi chuyển file vào các thư mục, mở demo bằng `scripts\RUN_DEMO.cmd` hoặc lệnh ở mục 2; các lệnh cũ như `python demo_fti.py` không còn đúng đường dẫn. Trong VS Code, mở thư mục gốc, chọn cấu hình **LinCIR demo** và nhấn F5. Cấu hình này dùng `.venv` của project. Nếu dùng nút Run Python File, chọn interpreter `.venv\Scripts\python.exe` qua **Python: Select Interpreter**; Python mặc định của máy có thể chưa cài Gradio và PyTorch.
+
+Môi trường đã kiểm chứng trên máy phát triển: Windows, Python 3.14, CPU; phiên bản thư viện được cố định trong `requirements/requirements.txt`. Không cần GPU hoặc train lại. Các nền tảng khác chưa được kiểm chứng đầy đủ. Trên Linux/macOS, tạo môi trường bằng `python3 -m venv .venv` và dùng `.venv/bin/python` thay cho đường dẫn Windows; chọn gói PyTorch phù hợp hệ điều hành.
+
+`lincir.data.setup_models` tải CLIP ViT-L/14, **chỉ tokenizer_2** của SDXL (không tải mô hình sinh ảnh SDXL), checkpoint LinCIR, checkpoint FTI và hai file nguồn FTI cần thiết. Các asset cố định theo revision/commit; checkpoint và nguồn FTI kiểm tra SHA256 trong model_manifest.json. Lần đầu cần Internet và vài GB dung lượng model/cache. Lần sau dùng model local.
 
 Cache mặc định: `hf_models/` trong project mới. Để tương thích máy phát triển, nếu Windows đã có `C:/hf_cache` thì dùng cache đó. Có thể đổi bằng `--cache_dir` ở demo local hoặc `--cache-dir` ở setup/benchmark, hoặc đặt cùng biến môi trường cho mọi lệnh:
 
 ```powershell
 $env:CIR_MODEL_CACHE = "D:\cir_model_cache"
-.\.venv\Scripts\python.exe setup_models.py
+.\.venv\Scripts\python.exe -m lincir.data.setup_models
 ```
 
 ## 2. Demo thường — không cần tải CIRCO
 
 ```powershell
-.\.venv\Scripts\python.exe demo_fti.py
+.\.venv\Scripts\python.exe -m lincir.apps.demo_fti
 ```
 
-Mở **http://127.0.0.1:8013/** (Windows: chạy `RUN_DEMO.cmd`). Chọn **Nguồn ảnh: Kho ảnh local / LAION online** ngay trong giao diện; dùng chung ảnh tham chiếu và mô tả khi chuyển nguồn. Cả hai nguồn đều có nút **So sánh cả ba phiên bản** và ba cột LinCIR gốc, gated, FTI4CIR. Các phương pháp giữ nguyên cách tạo truy vấn và xếp hạng; lựa chọn nguồn chỉ đổi kho vector và cách hiển thị ảnh. Với Local, thêm ảnh ứng viên vào `gallery/` hoặc qua giao diện; có thể chọn ảnh đối chiếu để xem thứ hạng. Với LAION, cả ba cùng tìm trên tập vector đã chuẩn bị, ảnh được trình duyệt tải trực tiếp từ URL gốc. Đổi nguồn sẽ xóa kết quả cũ.
+Mở **http://127.0.0.1:8013/** (Windows: chạy `scripts\RUN_DEMO.cmd`). Chọn **Nguồn ảnh: Kho ảnh local / LAION online** ngay trong giao diện; dùng chung ảnh tham chiếu và mô tả khi chuyển nguồn. Cả hai nguồn đều có nút **So sánh cả ba phiên bản** và ba cột LinCIR gốc, gated, FTI4CIR. Các phương pháp giữ nguyên cách tạo truy vấn và xếp hạng; lựa chọn nguồn chỉ đổi kho vector và cách hiển thị ảnh. Với Local, thêm ảnh ứng viên vào `gallery/` hoặc qua giao diện; có thể chọn ảnh đối chiếu để xem thứ hạng. Với LAION, cả ba cùng tìm trên tập vector đã chuẩn bị, ảnh được trình duyệt tải trực tiếp từ URL gốc. Đổi nguồn sẽ xóa kết quả cũ.
 
 - Cần có ảnh phù hợp trong kho. Không có ảnh đáp ứng thì hệ thống vẫn trả ảnh gần nhất.
 - Lần đầu mã hóa ảnh thành vector và lưu tại `outputs/index/`; thêm/sửa ảnh sẽ cập nhật phần cần thiết.
 - `Ảnh mới` đo cả mã hóa ảnh tham chiếu; `Ảnh dùng lại` chuẩn bị cache trước bộ đếm. Thời gian chuẩn bị được báo riêng.
 - Điểm tương đồng không phải xác suất chính xác. Mô hình có thể bỏ sót màu sắc, hoa văn nhỏ hoặc yêu cầu phức tạp.
 
-Demo hai bản gốc/gated: `python demo.py` tại http://127.0.0.1:8000/. Nếu đã kích hoạt môi trường, có thể dùng `python` thay đường dẫn đầy đủ. Windows có `RUN_DEMO.cmd` chạy demo ba bản.
+Demo hai bản gốc/gated: `python -m lincir.apps.demo` tại http://127.0.0.1:8000/. Nếu đã kích hoạt môi trường, có thể dùng `python` thay đường dẫn đầy đủ. Windows có `scripts\RUN_DEMO.cmd` chạy demo ba bản.
 
 ### Tìm ảnh LAION online
 
 Chế độ này dùng chung embedding OpenAI CLIP ViT-L/14 từ [mẫu LAION do ClickHouse cung cấp](https://clickhouse.com/docs/get-started/sample-datasets/laion5b) cho **LinCIR gốc, gated và FTI4CIR**. Chỉ mục vector và URL lưu trên máy; trình duyệt lấy ảnh kết quả trực tiếp từ website gốc. Không tải kho ảnh về `gallery/`.
 
 ```powershell
-.\.venv\Scripts\python.exe -m pip install -r requirements-online.txt
-.\.venv\Scripts\python.exe -B -X utf8 prepare_laion.py
-.\.venv\Scripts\python.exe -B -X utf8 demo_fti.py --source laion
+.\.venv\Scripts\python.exe -m pip install -r requirements/requirements-online.txt
+.\.venv\Scripts\python.exe -B -X utf8 -m lincir.data.prepare_laion
+.\.venv\Scripts\python.exe -B -X utf8 -m lincir.apps.demo_fti --source laion
 ```
 
-Mở **http://127.0.0.1:8013/**, chọn **LAION online**, ảnh tham chiếu, nhập mô tả tiếng Anh và nhấn **So sánh cả ba phiên bản**. `RUN_DEMO.cmd` dùng chung cho cả hai nguồn. `RUN_LAION.cmd` là lối tắt: chuẩn bị chỉ mục lần đầu, dùng lại ở lần sau và mở cùng giao diện chính với LAION được chọn sẵn. Chỉ chạy một launcher tại một thời điểm; cả hai dùng cổng 8013 mặc định. Chưa có chỉ mục LAION vẫn có thể dùng Local; việc đọc chỉ mục LAION chỉ diễn ra khi tìm trên nguồn đó.
+Mở **http://127.0.0.1:8013/**, chọn **LAION online**, ảnh tham chiếu, nhập mô tả tiếng Anh và nhấn **So sánh cả ba phiên bản**. `scripts\RUN_DEMO.cmd` dùng chung cho cả hai nguồn. `scripts\RUN_LAION.cmd` là lối tắt: chuẩn bị chỉ mục lần đầu, dùng lại ở lần sau và mở cùng giao diện chính với LAION được chọn sẵn. Chỉ chạy một launcher tại một thời điểm; cả hai dùng cổng 8013 mặc định. Chưa có chỉ mục LAION vẫn có thể dùng Local; việc đọc chỉ mục LAION chỉ diễn ra khi tìm trên nguồn đó.
 
 - Mặc định quét 50.000 dòng ở row group đầu, giữ các vector hợp lệ có nhãn `NSFW=UNLIKELY`. Giao diện báo đúng số ứng viên còn lại. Đây là **tập con**, không tìm toàn bộ LAION-5B; các chủ đề ngoài mẫu có thể không có ảnh phù hợp.
 - Lần đầu tải metadata/vector qua HTTP Range, khoảng 80 MiB với mẫu mặc định (cấu trúc nguồn có thể thay đổi); giới hạn mặc định 512 MiB. Không tải nguyên file Parquet 15,9 GB. Lần sau dùng lại `outputs/laion_index/`, không tải lại vector.
-- Đổi mẫu bằng `python prepare_laion.py --rows 100000 --row-group 1 --output outputs/laion_index_100k`, rồi chạy demo với `--laion-index outputs/laion_index_100k`. Chỉ mục mới cần thư mục mới; không thay index khi demo đang dùng.
+- Đổi mẫu bằng `python -m lincir.data.prepare_laion --rows 100000 --row-group 1 --output outputs/laion_index_100k`, rồi chạy demo với `--laion-index outputs/laion_index_100k`. Chỉ mục mới cần thư mục mới; không thay index khi demo đang dùng.
 - Ảnh hiển thị từ URL ngoài, có thể bị xóa/chặn hoặc có chất lượng thấp. Nhãn NSFW của dataset không bảo đảm nội dung phù hợp. Ứng dụng không tự xác nhận ảnh đáp ứng mô tả.
-- Kiểm tra chỉ mục: `python prepare_laion.py --check`. Kiểm tra logic không dùng mạng: `python check_laion.py`; kiểm tra chuyển nguồn và định tuyến giao diện chính: `python check_main_ui.py`.
+- Kiểm tra chỉ mục: `python -m lincir.data.prepare_laion --check`. Kiểm tra logic không dùng mạng: `python -m tests.check_laion`; kiểm tra chuyển nguồn và định tuyến giao diện chính: `python -m tests.check_main_ui`.
+
+Nếu gặp `FileNotFoundError` với `outputs/laion_index/manifest.json` sau khi gộp hoặc chuyển project, chỉ mục LAION chưa được mang theo. Từ thư mục gốc chạy `.\.venv\Scripts\python.exe -m lincir.data.prepare_laion`, chờ báo `Sẵn sàng`, rồi tìm lại. Có thể dùng `scripts\RUN_LAION.cmd` để chuẩn bị chỉ mục trước khi mở giao diện. Không tự tạo file manifest rỗng; chỉ mục cần đủ `manifest.json`, `records.json` và `vectors.npy`. Thư mục `outputs/` bị Git bỏ qua nên clone/pull không mang theo chỉ mục này.
 
 So sánh ba phương pháp cần chỉ mục vector trên máy, vì gated kết hợp thêm điểm từ ảnh tham chiếu. Có thể đo cả chế độ ảnh mới và ảnh dùng lại; thời gian không gồm tải ảnh kết quả trên trình duyệt. LAION không có nhãn ảnh đích cho truy vấn này nên không tính hạng ảnh đối chiếu hay độ chính xác tự động.
 
-Khi có server, demo LinCIR riêng (`demo.py --source laion`) có thể gửi vector sang API tương thích `clip-retrieval` bằng `--laion-api-url https://your-server/knn-service`. Server phải phục vụ index `laion5B-L-14` với embedding **OpenAI CLIP ViT-L/14**; chỉ có cùng số chiều là chưa đủ. API công khai cũ không được dùng mặc định vì đang không kết nối được. Chế độ này chỉ gửi vector truy vấn, không gửi file ảnh tham chiếu. Mã chuẩn bị chỉ mục cũng có thể chạy trên server; việc triển khai server nằm ngoài bản thử nghiệm trên máy.
+Khi có server, demo LinCIR riêng (`python -m lincir.apps.demo --source laion`) có thể gửi vector sang API tương thích `clip-retrieval` bằng `--laion-api-url https://your-server/knn-service`. Server phải phục vụ index `laion5B-L-14` với embedding **OpenAI CLIP ViT-L/14**; chỉ có cùng số chiều là chưa đủ. API công khai cũ không được dùng mặc định vì đang không kết nối được. Chế độ này chỉ gửi vector truy vấn, không gửi file ảnh tham chiếu. Mã chuẩn bị chỉ mục cũng có thể chạy trên server; việc triển khai server nằm ngoài bản thử nghiệm trên máy.
 
 ## 3. Demo các ví dụ CIRCO đã chọn
 
 Cần đủ bộ dữ liệu CIRCO trước:
 
 ```powershell
-.\.venv\Scripts\python.exe prepare_circo.py
-.\.venv\Scripts\python.exe prepare_circo.py --check
-.\.venv\Scripts\python.exe demo_circo_showcase.py
+.\.venv\Scripts\python.exe -m lincir.data.prepare_circo
+.\.venv\Scripts\python.exe -m lincir.data.prepare_circo --check
+.\.venv\Scripts\python.exe -m lincir.apps.demo_circo_showcase
 ```
 
 Chỉ chạy benchmark đầy đủ khi `ready: true`, `missing_images: 0`. Dữ liệu có **123.403 ảnh**, khoảng hơn 20 GB; nên dành tối thiểu 30 GB trống cho dữ liệu và dự phòng, chưa tính model. Công cụ tải có thể tiếp tục khi chạy lại. Không xóa ảnh sau khi tạo vector: demo và một số bước đánh giá vẫn cần ảnh.
@@ -94,7 +100,7 @@ Các ví dụ được chọn để minh họa, không thay thế benchmark tổ
 Thử nhanh 5 truy vấn trên toàn bộ kho:
 
 ```powershell
-.\.venv\Scripts\python.exe -B -X utf8 benchmark_circo.py --modes baseline gated fti_clip --limit 5 --batch-size 1 --cpu-threads 1 --independent-latency --prepared-reference-latency --output outputs/circo_smoke.json
+.\.venv\Scripts\python.exe -B -X utf8 -m lincir.data.benchmark_circo --modes baseline gated fti_clip --limit 5 --batch-size 1 --cpu-threads 1 --independent-latency --prepared-reference-latency --output outputs/circo_smoke.json
 ```
 
 Chạy đủ 220 truy vấn: bỏ `--limit 5`, đổi output sang `outputs/circo_three_versions.json`. Một lần chạy có giới hạn cứng **20 phút**, tính cả nạp model/tạo index. Máy mới chưa có vector có thể vượt giới hạn; chạy lại cùng lệnh để tiếp tục index. Không coi output chạy dở là benchmark đầy đủ. Chạy lại tiếp tục nếu cấu hình và mã giữ nguyên; thay mã/cấu hình thì dùng tên output mới.
@@ -119,10 +125,15 @@ Bằng chứng tại `docs/results/`. Đây là CIRCO **validation**, đã dùng
 
 | Vị trí | Nội dung |
 |---|---|
-| `demo.py`, `demo_fti.py`, `demo_circo_showcase.py` | Giao diện local và so sánh CIRCO |
-| `upgraded_retrieval.py`, `fti_retrieval.py` | Hai nâng cấp được giữ |
-| `setup_models.py`, `model_manifest.json` | Tải/kiểm tra asset đúng phiên bản |
-| `prepare_circo.py`, `benchmark_circo.py` | Dữ liệu và đánh giá |
+| `lincir/apps/` | `demo.py`, `demo_fti.py`, `demo_circo_showcase.py`, `run_pretrained.py`: giao diện local và so sánh CIRCO |
+| `lincir/core/` | Mô hình và thuật toán: `models.py`, `encode_with_pseudo_tokens.py`, `upgraded_retrieval.py`, `fti_retrieval.py`, `retrieval_utils.py`, `laion_online.py`, `clip_client.py`, `runtime_config.py` |
+| `lincir/data/` | `setup_models.py`, `prepare_circo.py`, `prepare_laion.py`, `benchmark_circo.py`, `package_project.py`: tải dữ liệu, đánh giá, đóng gói |
+| `lincir/training/` | Mã train/evaluate gốc của LinCIR |
+| `model_manifest.json` | Danh sách asset đúng phiên bản |
+| `tests/` | `check_laion.py`, `check_main_ui.py` |
+| `scripts/` | Các file `.cmd` chạy nhanh trên Windows |
+| `requirements/` | Các file `requirements*.txt` |
+| `assets/` | Ảnh ví dụ và bài báo PDF |
 | `docs/results/`, `docs/demo_cases.json` | Bằng chứng và ví dụ |
 | `docs/history/`, `docs/README_UPSTREAM.md` | Báo cáo trước và hướng dẫn nghiên cứu gốc |
 | `gallery/`, `benchmarks/` | Ảnh trên máy, bị Git bỏ qua |
@@ -131,22 +142,22 @@ Bằng chứng tại `docs/results/`. Đây là CIRCO **validation**, đã dùng
 
 Pull mã nguồn **không mang theo** model, ảnh hoặc vector. Mỗi thành viên chạy setup một lần; chỉ cần CIRCO nếu dùng demo/benchmark CIRCO. Khi đổi máy/đường dẫn, index có thể phải tạo lại vì cache kiểm tra đường dẫn, kích thước và thời gian sửa file.
 
-Mã train/evaluate gốc vẫn giữ để tham khảo. Chỉ cài `requirements-training.txt` và xem tài liệu upstream nếu cần nghiên cứu phần đó; nhánh training không nằm trong kiểm tra demo của nhóm.
+Mã train/evaluate gốc vẫn giữ để tham khảo. Chỉ cài `requirements/requirements-training.txt` và xem tài liệu upstream nếu cần nghiên cứu phần đó; nhánh training không nằm trong kiểm tra demo của nhóm.
 
 ## 6. Cập nhật và đóng gói
 
-Sau khi pull: cài lại requirements nếu thay đổi, chạy `python setup_models.py --check`, rồi mở demo. Đóng gói mã nguồn đã chọn bằng:
+Sau khi pull: cài lại requirements nếu thay đổi, chạy `python -m lincir.data.setup_models --check`, rồi mở demo. Đóng gói mã nguồn đã chọn bằng:
 
 ```powershell
-.\.venv\Scripts\python.exe package_project.py
+.\.venv\Scripts\python.exe -m lincir.data.package_project
 ```
 
 Gói ZIP và danh sách SHA256 nằm trong `dist/`; không chứa `.git`, model, ảnh gallery/CIRCO, cache, log hoặc môi trường. Để đưa lên GitHub, dùng repository hiện tại, kiểm tra `git status`, commit mã/docs cần thiết rồi push lên repository nhóm. Không dùng `git add -f` với dữ liệu/model.
 
 ## 7. Lỗi thường gặp
 
-- Thiếu checkpoint/cache: chạy `python setup_models.py`; nếu dùng cache riêng, đặt cùng đường dẫn cho setup và demo.
-- Thiếu thư viện: xác nhận dùng Python của `.venv`, cài `requirements.txt`.
+- Thiếu checkpoint/cache: chạy `python -m lincir.data.setup_models`; nếu dùng cache riêng, đặt cùng đường dẫn cho setup và demo.
+- Thiếu thư viện: xác nhận dùng Python của `.venv`, cài `requirements/requirements.txt`.
 - Cổng bận: thêm `--port 8016` vào lệnh demo.
 - CIRCO chưa sẵn sàng: chạy lại prepare và check; demo thường vẫn dùng được với kho riêng.
 - Lần đầu lâu: phải nạp model và tạo vector. `Get-Content ... -Wait` chỉ xem log, không phải tiến trình tải.
